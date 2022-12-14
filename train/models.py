@@ -236,5 +236,3 @@ class CrossEntropyTimeDistributedLoss(nn.Module):
         loss = self.loss_func(_y_hat, _y)
         loss = torch.sum(loss)
         return loss
-
-
