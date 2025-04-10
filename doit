@@ -1,0 +1,8 @@
+echo assuming installs done in README-JOS.md
+python main.py --gen_dataset
+python main.py --eval_nn
+
+echo Everything works
+
+# Runs 3-6 hrs on a GPU:
+python main.py --train

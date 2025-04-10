@@ -1,10 +1,11 @@
 from train.models import TonicNet
 from torch import cat, multinomial
-from torch import cuda, load, device, tensor, zeros
+from torch import cuda, load, device as torch_device, tensor, zeros
 from torch.nn import LogSoftmax
 import pickle
 import random
 from copy import deepcopy
+import torch
 
 """
 Functions to sample from trained models
@@ -12,21 +13,33 @@ Functions to sample from trained models
 
 
 def sample_TonicNet_random(load_path, max_tokens=2999, temperature=1.0):
+    # Get the device
+    try:
+        from main import device
+    except ImportError:
+        # Fallback if main.device is not available
+        if cuda.is_available():
+            device_obj = torch_device("cuda")
+        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device_obj = torch_device("mps")
+        else:
+            device_obj = torch_device("cpu")
+    else:
+        device_obj = device
+
+    print(f"Sampling on device: {device_obj}")
 
     model = TonicNet(nb_tags=98, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.0)
 
     try:
-        if cuda.is_available():
-            model.load_state_dict(load(load_path)['model_state_dict'])
-        else:
-            model.load_state_dict(load(load_path, map_location=device('cpu'))['model_state_dict'])
-        print("loded params from", load_path)
+        model.load_state_dict(load(load_path, map_location=device_obj)['model_state_dict'])
+        print("loaded params from", load_path)
     except:
         raise ImportError(f'No file located at {load_path}, could not load parameters')
     print(model)
 
-    if cuda.is_available():
-        model.cuda()
+    # Move model to device
+    model.to(device_obj)
 
     model.eval()
     model.seq_len = 1
@@ -37,7 +50,8 @@ def sample_TonicNet_random(load_path, max_tokens=2999, temperature=1.0):
 
     seed, pos_dict = __get_seed()
 
-    x = seed
+    # Move seed to device
+    x = seed.to(device_obj)
     x_post = x
 
     inst_conv_dict = {0: 0, 1: 1, 2: 4, 3: 2, 4: 3}
@@ -57,7 +71,7 @@ def sample_TonicNet_random(load_path, max_tokens=2999, temperature=1.0):
         inst = inst_conv_dict[i % 5]
         psx = pos_dict[inst]
 
-        psx_t = tensor(psx).view(1, 1)
+        psx_t = tensor(psx).view(1, 1).to(device_obj)
 
         y_hat = model(x, z=psx_t, sampling=True,
                       reset_hidden=reset_hidden).data.view(-1).div(temperature).exp()
@@ -99,21 +113,34 @@ def sample_TonicNet_beam_search(load_path, max_tokens=2999, beam_width=10, alpha
     :return: generated list of token indices
     """
 
+    # Get the device
+    try:
+        from main import device
+    except ImportError:
+        # Fallback if main.device is not available
+        if cuda.is_available():
+            device_obj = torch_device("cuda")
+        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device_obj = torch_device("mps")
+        else:
+            device_obj = torch_device("cpu")
+    else:
+        device_obj = device
+
+    print(f"Beam search sampling on device: {device_obj}")
+
     model = TonicNet(nb_tags=98, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.0)
     logsoftmax = LogSoftmax(dim=0)
 
     try:
-        if cuda.is_available():
-            model.load_state_dict(load(load_path)['model_state_dict'])
-        else:
-            model.load_state_dict(load(load_path, map_location=device('cpu'))['model_state_dict'])
-        print("loded params from", load_path)
+        model.load_state_dict(load(load_path, map_location=device_obj)['model_state_dict'])
+        print("loaded params from", load_path)
     except:
         raise ImportError(f'No file located at {load_path}, could not load parameters')
     print(model)
 
-    if cuda.is_available():
-        model.cuda()
+    # Move model to device
+    model.to(device_obj)
 
     model.eval()
     model.seq_len = 1
@@ -125,7 +152,8 @@ def sample_TonicNet_beam_search(load_path, max_tokens=2999, beam_width=10, alpha
 
     seed, pos_dict = __get_seed()
 
-    x = seed
+    # Move seed to device
+    x = seed.to(device_obj)
     x_post = x
 
     inst_conv_dict = {0: 0, 1: 1, 2: 4, 3: 2, 4: 3}
@@ -244,9 +272,8 @@ def sample_TonicNet_beam_search(load_path, max_tokens=2999, beam_width=10, alpha
 
 
 def __get_seed():
-
     seed = random.choice(range(48, 72))
-    x = tensor(seed)
+    x = tensor(seed, dtype=torch.long)
 
     p_dct = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0}
 

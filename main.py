@@ -1,4 +1,5 @@
 import sys
+import torch
 from preprocessing.nn_dataset import bach_chorales_classic
 from train.train_nn import train_TonicNet, TonicNet_lr_finder, TonicNet_sanity_test
 from train.train_nn import CrossEntropyTimeDistributedLoss
@@ -6,6 +7,22 @@ from train.models import TonicNet
 from eval.utils import plot_loss_acc_curves, indices_to_stream, smooth_rhythm
 from eval.eval import eval_on_test_set
 from eval.sample import sample_TonicNet_random
+
+def get_device():
+    """
+    Get the best available device for PyTorch operations.
+    Returns CUDA if available, else MPS (Metal Performance Shaders) if available, else CPU.
+    """
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
+# Set the global device
+device = get_device()
+print(f"Using device: {device}")
 
 if len(sys.argv) > 1:
     if sys.argv[1] in ['--train', '-t']:
@@ -67,8 +84,3 @@ else:
     print("--eval_nn\t\t evaluate pretrained model on test set")
     print("--sample\t\t sample from pretrained model")
     print("")
-
-
-
-
-

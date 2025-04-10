@@ -1,0 +1,1 @@
+conda install music21

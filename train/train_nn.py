@@ -2,7 +2,7 @@ import time, os
 import math
 import matplotlib.pyplot as plt
 from torch import save, set_grad_enabled, sum, max
-from torch import optim, cuda, load, device
+from torch import optim, cuda, load, device as torch_device
 from torch.nn.utils import clip_grad_norm_
 from preprocessing.nn_dataset import get_data_set, TOTAL_BATCHES, TRAIN_BATCHES, N_TOKENS
 from train.models import CrossEntropyTimeDistributedLoss
@@ -52,21 +52,32 @@ def train_TonicNet(epochs,
                     lr_range_test=False,
                     sanity_test=False):
 
+    # Get the device
+    try:
+        from main import device
+    except ImportError:
+        # Fallback if main.device is not available
+        if cuda.is_available():
+            device = torch_device("cuda")
+        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = torch_device("mps")
+        else:
+            device = torch_device("cpu")
+
+    print(f"Training on device: {device}")
+
     model = TonicNet(nb_tags=N_TOKENS, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.3)
 
     if load_path != '':
         try:
-            if cuda.is_available():
-                model.load_state_dict(load(load_path)['model_state_dict'])
-            else:
-                model.load_state_dict(load(load_path, map_location=device('cpu'))['model_state_dict'])
-            print("loded params from", load_path)
+            model.load_state_dict(load(load_path, map_location=device)['model_state_dict'])
+            print("loaded params from", load_path)
         except:
             raise ImportError(f'No file located at {load_path}, could not load parameters')
     print(model)
 
-    if cuda.is_available():
-        model.cuda()
+    # Move model to device
+    model.to(device)
 
     base_lr = 0.2
     max_lr = 0.2
@@ -138,6 +149,11 @@ def train_TonicNet(epochs,
 
             for x, y, psx, i, c in get_data_set(phase, shuffle_batches=shuffle_batches, return_I=1):
                 model.zero_grad()
+
+                # Move data to device
+                x = x.to(device)
+                y = y.to(device)
+                i = i.to(device)
 
                 if phase == 'train' and (epoch > -1 or load_path != ''):
                     if train_emb_freq < 1000:
@@ -251,21 +267,32 @@ def train_Transformer(epochs,
                     lr_range_test=False,
                     sanity_test=False):
 
+    # Get the device
+    try:
+        from main import device
+    except ImportError:
+        # Fallback if main.device is not available
+        if cuda.is_available():
+            device = torch_device("cuda")
+        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = torch_device("mps")
+        else:
+            device = torch_device("cpu")
+
+    print(f"Training Transformer on device: {device}")
+
     model = Transformer_Model(nb_tags=N_TOKENS, nb_layers=5, emb_dim=256, dropout=0.1, pe_dim=256)
 
     if load_path != '':
         try:
-            if cuda.is_available():
-                model.load_state_dict(load(load_path)['model_state_dict'])
-            else:
-                model.load_state_dict(load(load_path, map_location=device('cpu'))['model_state_dict'])
-            print("loded params from", load_path)
+            model.load_state_dict(load(load_path, map_location=device)['model_state_dict'])
+            print("loaded params from", load_path)
         except:
             raise ImportError(f'No file located at {load_path}, could not load parameters')
     print(model)
 
-    if cuda.is_available():
-        model.cuda()
+    # Move model to device
+    model.to(device)
 
     base_lr = 0.06
     max_lr = 0.06
@@ -338,6 +365,10 @@ def train_Transformer(epochs,
                 model.eval()  # Set model to evaluate mode
 
             for x, y, psx, i, c in get_data_set(phase, shuffle_batches=shuffle_batches, return_I=1):
+                # Move data to device
+                x = x.to(device)
+                y = y.to(device)
+                psx = psx.to(device)
 
                 Y = y
                 model.seq_len = x.shape[1]
@@ -434,13 +465,20 @@ def __save_model(epoch, ave_loss_epoch, model, model_name, acc):
             if item.endswith(".pt"):
                 os.remove(os.path.join('eval', item))
 
+        # Get device info
+        try:
+            device_type = str(model.device.type)
+        except:
+            device_type = "unknown"
+
         path_loss = round(ave_loss_epoch, 3)
         path_acc = '%.3f' % acc
         path = f'eval/{model_name}_epoch-{epoch}_loss-{path_loss}_acc-{path_acc}.pt'
         save({
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
-            'loss': path_loss
+            'loss': path_loss,
+            'device': device_type
         }, path)
         print("\tSAVED MODEL TO:", path)
 

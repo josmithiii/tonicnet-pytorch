@@ -30,6 +30,18 @@ class TonicNet(nn.Module):
         self.__build_model()
 
     def __build_model(self):
+        # Get the global device
+        try:
+            from main import device
+            self.device = device
+        except ImportError:
+            # Fallback if main.device is not available
+            if torch.cuda.is_available():
+                self.device = torch.device("cuda")
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                self.device = torch.device("mps")
+            else:
+                self.device = torch.device("cpu")
 
         self.embedding = nn.Embedding(self.nb_tags, self.nb_rnn_units)
 
@@ -62,8 +74,8 @@ class TonicNet(nn.Module):
         # the weights are of the form (nb_layers, batch_size, nb_rnn_units)
         hidden_a = torch.randn(self.nb_layers, self.batch_size, self.nb_rnn_units)
 
-        if torch.cuda.is_available():
-            hidden_a = hidden_a.cuda()
+        # Move tensor to the appropriate device
+        hidden_a = hidden_a.to(self.device)
 
         return hidden_a
 
@@ -124,6 +136,18 @@ class Transformer_Model(nn.Module):
         self.__build_model()
 
     def __build_model(self):
+        # Get the global device
+        try:
+            from main import device
+            self.device = device
+        except ImportError:
+            # Fallback if main.device is not available
+            if torch.cuda.is_available():
+                self.device = torch.device("cuda")
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                self.device = torch.device("mps")
+            else:
+                self.device = torch.device("cpu")
 
         self.embedding = nn.Embedding(self.nb_tags, self.emb_dim)
 
@@ -176,8 +200,7 @@ class Transformer_Model(nn.Module):
         self.mask = (torch.triu(torch.ones(self.seq_len, self.seq_len)) == 1).transpose(0, 1)
         self.mask = self.mask.float().masked_fill(self.mask == 0, float('-inf')).masked_fill(self.mask == 1, float(0.0))
 
-        if torch.cuda.is_available():
-            self.mask = self.mask.cuda()
+        self.mask = self.mask.to(self.device)
 
         # ---------------------
         # Combine inputs
