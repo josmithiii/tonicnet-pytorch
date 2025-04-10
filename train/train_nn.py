@@ -1,6 +1,7 @@
 import time, os
 import math
 import matplotlib.pyplot as plt
+import torch
 from torch import save, set_grad_enabled, sum, max
 from torch import optim, cuda, load, device as torch_device
 from torch.nn.utils import clip_grad_norm_
@@ -59,14 +60,14 @@ def train_TonicNet(epochs,
         # Fallback if main.device is not available
         if cuda.is_available():
             device = torch_device("cuda")
-        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built():
             device = torch_device("mps")
         else:
             device = torch_device("cpu")
 
     print(f"Training on device: {device}")
 
-    model = TonicNet(nb_tags=N_TOKENS, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.3)
+    model = TonicNet(nb_tags=N_TOKENS, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.3, device=device)
 
     if load_path != '':
         try:
@@ -274,14 +275,14 @@ def train_Transformer(epochs,
         # Fallback if main.device is not available
         if cuda.is_available():
             device = torch_device("cuda")
-        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built():
             device = torch_device("mps")
         else:
             device = torch_device("cpu")
 
     print(f"Training Transformer on device: {device}")
 
-    model = Transformer_Model(nb_tags=N_TOKENS, nb_layers=5, emb_dim=256, dropout=0.1, pe_dim=256)
+    model = Transformer_Model(nb_tags=N_TOKENS, nb_layers=5, emb_dim=256, dropout=0.1, pe_dim=256, device=device)
 
     if load_path != '':
         try:

@@ -12,8 +12,8 @@ File containing classes representing various Neural architectures
 
 # MARK:- TonicNet
 class TonicNet(nn.Module):
-    def __init__(self, nb_tags, nb_layers=1, z_dim =0,
-                 nb_rnn_units=100, batch_size=1, seq_len=1, dropout=0.0):
+    def __init__(self, nb_tags, nb_layers=1, z_dim=0,
+                 nb_rnn_units=100, batch_size=1, seq_len=1, dropout=0.0, device=None):
         super(TonicNet, self).__init__()
 
         self.nb_layers = nb_layers
@@ -26,23 +26,23 @@ class TonicNet(nn.Module):
 
         self.nb_tags = nb_tags
 
-        # build actual NN
-        self.__build_model()
-
-    def __build_model(self):
-        # Get the global device
-        try:
-            from main import device
+        # Set device
+        if device is not None:
             self.device = device
-        except ImportError:
-            # Fallback if main.device is not available
+        else:
+            # Determine best available device
             if torch.cuda.is_available():
                 self.device = torch.device("cuda")
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built():
                 self.device = torch.device("mps")
             else:
                 self.device = torch.device("cpu")
 
+        # build actual NN
+        self.__build_model()
+
+    def __build_model(self):
+        # Device is already determined in __init__
         self.embedding = nn.Embedding(self.nb_tags, self.nb_rnn_units)
 
         # Unused but key exists in state_dict
@@ -118,7 +118,7 @@ class TonicNet(nn.Module):
 
 class Transformer_Model(nn.Module):
     def __init__(self, nb_tags, nb_layers=1, pe_dim=0,
-                 emb_dim=100, batch_size=1, seq_len=MAX_SEQ, dropout=0.0, encoder_only=True):
+                 emb_dim=100, batch_size=1, seq_len=MAX_SEQ, dropout=0.0, encoder_only=True, device=None):
         super(Transformer_Model, self).__init__()
 
         self.nb_layers = nb_layers
@@ -132,23 +132,23 @@ class Transformer_Model(nn.Module):
 
         self.encoder_only = encoder_only
 
-        # build actual NN
-        self.__build_model()
-
-    def __build_model(self):
-        # Get the global device
-        try:
-            from main import device
+        # Set device
+        if device is not None:
             self.device = device
-        except ImportError:
-            # Fallback if main.device is not available
+        else:
+            # Determine best available device
             if torch.cuda.is_available():
                 self.device = torch.device("cuda")
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built():
                 self.device = torch.device("mps")
             else:
                 self.device = torch.device("cpu")
 
+        # build actual NN
+        self.__build_model()
+
+    def __build_model(self):
+        # Device is already determined in __init__
         self.embedding = nn.Embedding(self.nb_tags, self.emb_dim)
 
         if not self.encoder_only:

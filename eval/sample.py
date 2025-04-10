@@ -20,7 +20,7 @@ def sample_TonicNet_random(load_path, max_tokens=2999, temperature=1.0):
         # Fallback if main.device is not available
         if cuda.is_available():
             device_obj = torch_device("cuda")
-        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built():
             device_obj = torch_device("mps")
         else:
             device_obj = torch_device("cpu")
@@ -29,7 +29,7 @@ def sample_TonicNet_random(load_path, max_tokens=2999, temperature=1.0):
 
     print(f"Sampling on device: {device_obj}")
 
-    model = TonicNet(nb_tags=98, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.0)
+    model = TonicNet(nb_tags=98, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.0, device=device_obj)
 
     try:
         model.load_state_dict(load(load_path, map_location=device_obj)['model_state_dict'])
@@ -120,7 +120,7 @@ def sample_TonicNet_beam_search(load_path, max_tokens=2999, beam_width=10, alpha
         # Fallback if main.device is not available
         if cuda.is_available():
             device_obj = torch_device("cuda")
-        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built():
             device_obj = torch_device("mps")
         else:
             device_obj = torch_device("cpu")
@@ -129,7 +129,7 @@ def sample_TonicNet_beam_search(load_path, max_tokens=2999, beam_width=10, alpha
 
     print(f"Beam search sampling on device: {device_obj}")
 
-    model = TonicNet(nb_tags=98, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.0)
+    model = TonicNet(nb_tags=98, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.0, device=device_obj)
     logsoftmax = LogSoftmax(dim=0)
 
     try:
@@ -172,7 +172,7 @@ def sample_TonicNet_beam_search(load_path, max_tokens=2999, beam_width=10, alpha
         print("")
         print(i)
 
-        log_probs = zeros((98*beam_width))
+        log_probs = zeros((98*beam_width), device=device_obj)
         updated = [False] * beam_width
 
         inst = inst_conv_dict[i % 5]
@@ -192,10 +192,10 @@ def sample_TonicNet_beam_search(load_path, max_tokens=2999, beam_width=10, alpha
 
             psx = pos_ds[b][inst]
 
-            psx_t = tensor(psx).view(1, 1)
+            psx_t = tensor(psx).view(1, 1).to(device_obj)
 
             if candidate_seqs[b][-1].item() == 0:
-                log_probs[(98 * b):(98 * (b + 1))] = tensor(98).fill_(-9999)
+                log_probs[(98 * b):(98 * (b + 1))] = tensor(98, device=device_obj).fill_(-9999)
             else:
                 y_hat = models[b](candidate_seqs[b][-1], z=psx_t, sampling=True, reset_hidden=reset_hidden)
                 log_probs[(98*b):(98*(b+1))] = logsoftmax(y_hat[0, 0, :]) + scores[b]
@@ -221,7 +221,7 @@ def sample_TonicNet_beam_search(load_path, max_tokens=2999, beam_width=10, alpha
                 rejection_reconciliation[m] = m
                 if candidate_seqs[m][-1].item() != 0:
                     scores[m] = prob
-                    candidate_seqs[m].append(tensor(y).view(1, 1, 1))
+                    candidate_seqs[m].append(tensor(y, device=device_obj).view(1, 1, 1))
                 else:
                     ended[m] = 1
 
@@ -234,7 +234,7 @@ def sample_TonicNet_beam_search(load_path, max_tokens=2999, beam_width=10, alpha
 
                     candidate_seqs[b2] = deepcopy(candidate_seqs[rejection_reconciliation[b2]])
                     candidate_seqs[b2].pop(-1)
-                    candidate_seqs[b2].append(tensor(temp_store[0][1]).view(1, 1, 1))
+                    candidate_seqs[b2].append(tensor(temp_store[0][1], device=device_obj).view(1, 1, 1))
 
                     models[b2].hidden = models[rejection_reconciliation[b2]].hidden
 
@@ -273,6 +273,8 @@ def sample_TonicNet_beam_search(load_path, max_tokens=2999, beam_width=10, alpha
 
 def __get_seed():
     seed = random.choice(range(48, 72))
+    # Create tensor without attaching to a device yet
+    # This will be moved to the appropriate device after return
     x = tensor(seed, dtype=torch.long)
 
     p_dct = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0}

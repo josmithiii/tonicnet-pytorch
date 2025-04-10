@@ -1,4 +1,5 @@
-from torch import cuda, load, device, set_grad_enabled, max, sum, cat
+from torch import cuda, load, device as torch_device, set_grad_enabled, max, sum, cat
+import torch
 from preprocessing.nn_dataset import get_test_set_for_eval_classic
 
 """
@@ -7,20 +8,31 @@ File containing functions to quantitatively evaluate trained models
 
 
 def eval_on_test_set(load_path, model, criterion, set='test', notes_only=False):
+    # Get the device
+    try:
+        from main import device
+    except ImportError:
+        # Fallback if main.device is not available
+        if cuda.is_available():
+            device = torch_device("cuda")
+        elif hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built():
+            device = torch_device("mps")
+        else:
+            device = torch_device("cpu")
+
+    print(f"Evaluating on device: {device}")
+
     model = model
 
     try:
-        if cuda.is_available():
-            model.load_state_dict(load(load_path)['model_state_dict'])
-        else:
-            model.load_state_dict(load(load_path, map_location=device('cpu'))['model_state_dict'])
-        print("loded params from", load_path)
+        model.load_state_dict(load(load_path, map_location=device)['model_state_dict'])
+        print("loaded params from", load_path)
     except:
         raise ImportError(f'No file located at {load_path}, could not load parameters')
     print(model)
 
-    if cuda.is_available():
-        model.cuda()
+    # Move model to device
+    model.to(device)
 
     model.eval()
     criterion = criterion
@@ -36,6 +48,14 @@ def eval_on_test_set(load_path, model, criterion, set='test', notes_only=False):
 
     for x, y, psx, i, c in get_test_set_for_eval_classic(set):
         model.zero_grad()
+
+        # Move data to device
+        x = x.to(device)
+        y = y.to(device)
+        i = i.to(device)
+
+        if psx is not None:
+            psx = psx.to(device)
 
         train_emb = False
 

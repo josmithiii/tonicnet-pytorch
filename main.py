@@ -15,7 +15,7 @@ def get_device():
     """
     if torch.cuda.is_available():
         return torch.device("cuda")
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built():
         return torch.device("mps")
     else:
         return torch.device("cpu")
@@ -43,9 +43,11 @@ if len(sys.argv) > 1:
         smooth_rhythm()
 
     elif sys.argv[1] in ['--eval_nn', '-e']:
+        # Create a model with the correct device setting
+        model = TonicNet(nb_tags=98, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.0, device=device)
         eval_on_test_set(
             'eval/TonicNet_epoch-58_loss-0.317_acc-90.928.pt',
-            TonicNet(nb_tags=98, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.0),
+            model,
             CrossEntropyTimeDistributedLoss(), set='test', notes_only=True)
 
     elif sys.argv[1] in ['--gen_dataset', '-gd']:

@@ -44,7 +44,7 @@ def get_data_set(mode, shuffle_batches=True, return_I=False):
         lst.remove('.DS_Store')
     except:
         pass
-    
+
     if shuffle_batches:
         lst = sample(lst, len(lst))
 
@@ -428,8 +428,16 @@ def position_encoding_init(n_position, emb_dim):
     position_enc[1:, 0::2] = np.sin(position_enc[1:, 0::2])  # apply sin on 0th,2nd,4th...emb_dim
     position_enc[1:, 1::2] = np.cos(position_enc[1:, 1::2])  # apply cos on 1st,3rd,5th...emb_dim
 
-    if torch.cuda.is_available():
-        position_enc = position_enc.cuda()
+    # Try to get device from main, otherwise fallback to device detection
+    try:
+        from main import device
+        position_enc = position_enc.to(device)
+    except ImportError:
+        # Fallback device detection
+        if torch.cuda.is_available():
+            position_enc = position_enc.cuda()
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built():
+            position_enc = position_enc.to(torch.device("mps"))
 
     return position_enc
 
