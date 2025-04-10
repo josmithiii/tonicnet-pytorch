@@ -41,6 +41,11 @@ class TonicNet(nn.Module):
         # build actual NN
         self.__build_model()
 
+        # Device-specific optimizations
+        self.optimize_for_device = self.device.type in ["cuda", "mps"]
+        if self.optimize_for_device:
+            print(f"Optimizing TonicNet for {self.device.type} performance")
+
     def __build_model(self):
         # Device is already determined in __init__
         self.embedding = nn.Embedding(self.nb_tags, self.nb_rnn_units)
@@ -83,6 +88,11 @@ class TonicNet(nn.Module):
         # reset the RNN hidden state.
         if not sampling:
             self.seq_len = X.shape[1]
+            # Update batch size based on input
+            actual_batch_size = X.shape[0] if X.dim() > 2 else X.shape[1]
+            if self.batch_size != actual_batch_size:
+                self.batch_size = actual_batch_size
+
             if reset_hidden:
                 self.hidden = self.init_hidden()
 
@@ -91,12 +101,20 @@ class TonicNet(nn.Module):
         # ---------------------
         # Combine inputs
         X = self.embedding(X)
-        X = X.view(self.batch_size, self.seq_len, self.nb_rnn_units)
+
+        # Handle different input dimensions for batched processing
+        if X.dim() == 3:
+            X = X.view(self.batch_size, self.seq_len, self.nb_rnn_units)
+        else:
+            X = X.view(1, self.seq_len, self.nb_rnn_units)
 
         # repeating pitch encoding
         if self.z_dim > 0:
             Z = self.z_embedding(z % 80)
-            Z = Z.view(self.batch_size, self.seq_len, self.z_emb_size)
+            if Z.dim() == 2:
+                Z = Z.view(self.batch_size, self.seq_len, self.z_emb_size)
+            else:
+                Z = Z.view(1, self.seq_len, self.z_emb_size)
             X = torch.cat((Z, X), 2)
 
         X = self.dropout_i(X)

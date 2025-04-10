@@ -51,7 +51,8 @@ def train_TonicNet(epochs,
                     val=True,
                     train_emb_freq=1,
                     lr_range_test=False,
-                    sanity_test=False):
+                    sanity_test=False,
+                    batch_size=32):
 
     # Get the device
     try:
@@ -67,7 +68,11 @@ def train_TonicNet(epochs,
 
     print(f"Training on device: {device}")
 
-    model = TonicNet(nb_tags=N_TOKENS, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.3, device=device)
+    # Print device type info
+    print(f"Using device type: {device.type}")
+    # Let PyTorch manage memory automatically
+
+    model = TonicNet(nb_tags=N_TOKENS, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.3, batch_size=batch_size, device=device)
 
     if load_path != '':
         try:
@@ -79,6 +84,8 @@ def train_TonicNet(epochs,
 
     # Move model to device
     model.to(device)
+
+    # Future enhancement: Add mixed precision support for faster training
 
     base_lr = 0.2
     max_lr = 0.2
@@ -148,7 +155,7 @@ def train_TonicNet(epochs,
             else:
                 model.eval()  # Set model to evaluate mode
 
-            for x, y, psx, i, c in get_data_set(phase, shuffle_batches=shuffle_batches, return_I=1):
+            for x, y, psx, i, c in get_data_set(phase, shuffle_batches=shuffle_batches, return_I=1, batch_size=batch_size):
                 model.zero_grad()
 
                 # Move data to device
@@ -365,7 +372,7 @@ def train_Transformer(epochs,
             else:
                 model.eval()  # Set model to evaluate mode
 
-            for x, y, psx, i, c in get_data_set(phase, shuffle_batches=shuffle_batches, return_I=1):
+            for x, y, psx, i, c in get_data_set(phase, shuffle_batches=shuffle_batches, return_I=1, batch_size=batch_size):
                 # Move data to device
                 x = x.to(device)
                 y = y.to(device)
