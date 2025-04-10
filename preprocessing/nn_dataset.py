@@ -182,24 +182,22 @@ def get_data_set(mode, shuffle_batches=True, return_I=False, batch_size=1):
                     shapes_X = [x.shape for x in padded_X]
                     print(f"Batch shapes: {shapes_X[0]} x {len(shapes_X)}")
 
-                # For now, let's go back to single-item batches to make progress
-                # This avoids the need to handle variable-length sequences
-                for j in range(len(padded_X)):
-                    X_item = padded_X[j].unsqueeze(1)  # Add batch dimension
-                    Y_item = padded_Y[j].unsqueeze(1)  # Add batch dimension
-                    P_item = padded_P[j].unsqueeze(1)  # Add batch dimension
+                # Process as a single batch
+                X_batch = torch.stack(padded_X).to(device)
+                Y_batch = torch.stack(padded_Y).to(device)
+                P_batch = torch.stack(padded_P).to(device)
 
-                    if return_I:
-                        I_item = padded_I[j]
-                        C_item = padded_C[j]
-                        yield X_item, Y_item, P_item, I_item, C_item
-                    else:
-                        yield X_item, Y_item, P_item
+                if return_I:
+                    I_batch = torch.stack(padded_I).to(device)
+                    C_batch = torch.stack(padded_C).to(device)
+                    yield X_batch, Y_batch, P_batch, I_batch, C_batch
+                else:
+                    yield X_batch, Y_batch, P_batch
 
                 # Clear batch lists
                 batch_X, batch_Y, batch_P = [], [], []
                 batch_I, batch_C = [], []
-                continue  # Skip the stack attempt below
+                continue  # Skip the old logic below
 
                 # Original stacking logic - currently bypassed
                 X_batch = torch.stack(padded_X, dim=1)  # [seq_len, batch, feature]

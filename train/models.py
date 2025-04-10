@@ -104,17 +104,34 @@ class TonicNet(nn.Module):
 
         # Handle different input dimensions for batched processing
         if X.dim() == 3:
+            # Standard case: [batch, seq_len, embedding]
             X = X.view(self.batch_size, self.seq_len, self.nb_rnn_units)
+        elif X.dim() == 4:
+            # Batched case: [batch, seq_len, 1, embedding]
+            X = X.view(X.size(0), X.size(1), self.nb_rnn_units)
         else:
+            # Single sequence case
             X = X.view(1, self.seq_len, self.nb_rnn_units)
 
         # repeating pitch encoding
         if self.z_dim > 0:
             Z = self.z_embedding(z % 80)
+
+            # Handle different dimensions for Z similar to X
             if Z.dim() == 2:
+                # Basic case
                 Z = Z.view(self.batch_size, self.seq_len, self.z_emb_size)
+            elif Z.dim() == 3 and X.dim() == 3:
+                # Batch case, make sure dimensions align
+                Z = Z.view(Z.size(0), Z.size(1), self.z_emb_size)
             else:
+                # Single sequence case
                 Z = Z.view(1, self.seq_len, self.z_emb_size)
+
+            # Match Z dimensions to X
+            if X.size(0) != Z.size(0):
+                Z = Z.expand(X.size(0), Z.size(1), Z.size(2))
+
             X = torch.cat((Z, X), 2)
 
         X = self.dropout_i(X)

@@ -26,7 +26,7 @@ print(f"Using device: {device}")
 
 if len(sys.argv) > 1:
     if sys.argv[1] in ['--train', '-t']:
-        train_TonicNet(3000, shuffle_batches=1, train_emb_freq=1, load_path='', batch_size=32)
+        train_TonicNet(3000, shuffle_batches=1, train_emb_freq=1, load_path='', batch_size=1)
 
     elif sys.argv[1] in ['--plot', '-p']:
         plot_loss_acc_curves()
