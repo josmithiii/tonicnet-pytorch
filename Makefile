@@ -2,7 +2,7 @@ VENV := .venv
 PYTHON := $(VENV)/bin/python
 SOUNDFONT ?= $(firstword $(wildcard /opt/homebrew/Cellar/fluid-synth/*/share/fluid-synth/sf2/VintageDreamsWaves-v2.sf2 /usr/local/share/fluidsynth/default_sound_font.sf2))
 
-.PHONY: help setup dataset dataset-jsf dataset-jsf-only train eval sample wav
+.PHONY: help setup dataset dataset-jsf dataset-jsf-only train eval sample wav audition
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -35,3 +35,6 @@ sample:  ## Sample from pretrained model (random sampling)
 eval/sample.wav: eval/sample_smoothed.mid
 	fluidsynth -ni -F $@ -r 44100 $(SOUNDFONT) $<
 wav: eval/sample.wav  ## Render sample MIDI to WAV (requires: brew install fluid-synth)
+
+audition:  ## Convert dataset chorales to MIDI (SPLIT=test LIMIT=10)
+	$(PYTHON) dataset_to_midi.py --split $(or $(SPLIT),test) --limit $(or $(LIMIT),10)
