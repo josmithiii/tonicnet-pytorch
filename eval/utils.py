@@ -10,7 +10,7 @@ Utility functions for evaluating model training and saving samples from trained 
 
 def indices_to_stream(token_list, return_stream=False):
     inverse_t = pickle.load(open('tokenisers/inverse_pitch_only.p', 'rb'))
-    tl = token_list.squeeze()
+    tl = token_list.squeeze().cpu()
     tl = tl.numpy()
 
     sop_part = music21.stream.Part()

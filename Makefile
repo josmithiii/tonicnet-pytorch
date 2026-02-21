@@ -1,6 +1,6 @@
 VENV := .venv
 PYTHON := $(VENV)/bin/python
-SOUNDFONT ?= /usr/local/share/fluidsynth/default_sound_font.sf2
+SOUNDFONT ?= $(firstword $(wildcard /opt/homebrew/Cellar/fluid-synth/*/share/fluid-synth/sf2/VintageDreamsWaves-v2.sf2 /usr/local/share/fluidsynth/default_sound_font.sf2))
 
 .PHONY: help setup dataset dataset-jsf dataset-jsf-only train eval sample wav
 
@@ -33,5 +33,5 @@ sample:  ## Sample from pretrained model (random sampling)
 	$(PYTHON) main.py --sample
 
 eval/sample.wav: eval/sample_smoothed.mid
-	fluidsynth -ni $(SOUNDFONT) $< -F $@ -r 44100
+	fluidsynth -ni -F $@ -r 44100 $(SOUNDFONT) $<
 wav: eval/sample.wav  ## Render sample MIDI to WAV (requires: brew install fluid-synth)

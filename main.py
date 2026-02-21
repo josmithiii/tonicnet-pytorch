@@ -1,3 +1,4 @@
+import glob
 import sys
 import torch
 from preprocessing.nn_dataset import bach_chorales_classic
@@ -24,6 +25,17 @@ def get_device():
 device = get_device()
 print(f"Using device: {device}")
 
+
+def find_checkpoint() -> str:
+    """Find the single .pt checkpoint in eval/. Fail fast if missing or ambiguous."""
+    pts = sorted(glob.glob('eval/*.pt'))
+    if len(pts) == 0:
+        sys.exit("ERROR: no checkpoint found in eval/. Train a model first.")
+    if len(pts) > 1:
+        sys.exit(f"ERROR: multiple checkpoints in eval/: {pts}. Expected exactly one.")
+    print(f"Using checkpoint: {pts[0]}")
+    return pts[0]
+
 if len(sys.argv) > 1:
     if sys.argv[1] in ['--train', '-t']:
         train_TonicNet(3000, shuffle_batches=1, train_emb_freq=1, load_path='', batch_size=1)
@@ -38,15 +50,14 @@ if len(sys.argv) > 1:
         TonicNet_sanity_test(num_batches=1, train_emb_freq=1)
 
     elif sys.argv[1] in ['--sample', '-s']:
-        x = sample_TonicNet_random(load_path='eval/TonicNet_epoch-56_loss-0.328_acc-90.750.pt', temperature=1.0)
+        x = sample_TonicNet_random(load_path=find_checkpoint(), temperature=1.0)
         indices_to_stream(x)
         smooth_rhythm()
 
     elif sys.argv[1] in ['--eval_nn', '-e']:
-        # Create a model with the correct device setting
         model = TonicNet(nb_tags=98, z_dim=32, nb_layers=3, nb_rnn_units=256, dropout=0.0, device=device)
         eval_on_test_set(
-            'eval/TonicNet_epoch-58_loss-0.317_acc-90.928.pt',
+            find_checkpoint(),
             model,
             CrossEntropyTimeDistributedLoss(), set='test', notes_only=True)
 
