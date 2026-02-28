@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""Train PyTorch TonicNet on TF2-format pickle datasets.
+
+Usage:
+    python train.py                         # train from scratch
+    python train.py --weights ckpt.pt       # resume from checkpoint
+    python train.py --epochs 100            # custom epoch count
+    python train.py --overwrite             # overwrite existing best weights
+"""
+
+import argparse
+import datetime
+import os
+import pickle
+import sys
+import time
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from model import VOCABULARY, SONG_START, SONG_END, TonicNet
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+PAD_VALUE = -1  # sentinel for masked positions
+BATCH_SIZE = 32
+
+
+# ---------------------------------------------------------------------------
+# Data loading helpers (match TF2 train_jos.py exactly)
+# ---------------------------------------------------------------------------
+
+def compute_repetitions(sequence: list[int] | np.ndarray) -> list[int]:
+    """Compute repetition counts per token position (matches TF2 training)."""
+    repetitions = [0] * len(sequence)
+    for index, element in enumerate(sequence):
+        past_index = index - 5
+        if past_index >= 0:
+            past_element = sequence[past_index]
+            if past_element == SONG_START:
+                repetitions[index] = 0
+            elif element == SONG_END:
+                repetitions[index] = 0
+            elif past_element == element:
+                repetitions[index] = repetitions[past_index] + 1
+            else:
+                repetitions[index] = 0
+            if repetitions[index] > 79:
+                repetitions[index] = 79
+    return repetitions
+
+
+def compute_positions(sequence: list[int] | np.ndarray) -> list[int]:
+    """Compute position indices per token (0-15 cycling every 5 tokens)."""
+    return [0] + [index // 5 % 16 for index in range(len(sequence) - 1)]
+
+
+def to_supervised(songs: list[np.ndarray]) -> tuple[list, list, list, list]:
+    """Convert songs to (x, r, p, y) sequences for teacher forcing."""
+    xs, rs, ps, ys = [], [], [], []
+    for song in songs:
+        x = song[:-1]
+        y = song[1:]
+        r = compute_repetitions(x.tolist())
+        p = compute_positions(x.tolist())
+        xs.append(torch.tensor(x, dtype=torch.long))
+        rs.append(torch.tensor(r, dtype=torch.long))
+        ps.append(torch.tensor(p, dtype=torch.long))
+        ys.append(torch.tensor(y, dtype=torch.long))
+    return xs, rs, ps, ys
+
+
+def load_dataset(name: str) -> tuple[list, list, list, list]:
+    """Load a pickle dataset and convert to supervised tensors."""
+    assert name in ("train", "valid", "test"), name
+    filename = f"dataset_{name}.p"
+    if not os.path.exists(filename):
+        sys.exit(f"ERROR: {filename} not found. Copy from TF2 directory first.")
+    with open(filename, "rb") as f:
+        encoded_songs = pickle.load(f)
+    print(f"  {name}: {len(encoded_songs)} songs")
+    return to_supervised(encoded_songs)
+
+
+def collate_batch(
+    xs: list[torch.Tensor],
+    rs: list[torch.Tensor],
+    ps: list[torch.Tensor],
+    ys: list[torch.Tensor],
+    indices: list[int],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Pad a batch of variable-length sequences. Targets padded with PAD_VALUE."""
+    batch_x = [xs[i] for i in indices]
+    batch_r = [rs[i] for i in indices]
+    batch_p = [ps[i] for i in indices]
+    batch_y = [ys[i] for i in indices]
+
+    x = nn.utils.rnn.pad_sequence(batch_x, batch_first=True, padding_value=0)
+    r = nn.utils.rnn.pad_sequence(batch_r, batch_first=True, padding_value=0)
+    p = nn.utils.rnn.pad_sequence(batch_p, batch_first=True, padding_value=0)
+    y = nn.utils.rnn.pad_sequence(batch_y, batch_first=True, padding_value=PAD_VALUE)
+    return x, r, p, y
+
+
+# ---------------------------------------------------------------------------
+# Loss / accuracy with mask
+# ---------------------------------------------------------------------------
+
+def masked_loss_accuracy(
+    logits: torch.Tensor, targets: torch.Tensor
+) -> tuple[torch.Tensor, float]:
+    """Cross-entropy loss and accuracy, ignoring positions where target == PAD_VALUE."""
+    mask = targets != PAD_VALUE
+    y_safe = targets.clamp(min=0)
+
+    per_token_loss = F.cross_entropy(
+        logits.view(-1, logits.size(-1)), y_safe.view(-1), reduction="none"
+    )
+    per_token_loss = per_token_loss.view_as(targets)
+    loss = (per_token_loss * mask).sum() / mask.sum()
+
+    preds = logits.argmax(dim=-1)
+    accuracy = ((preds == targets) & mask).sum().item() / mask.sum().item()
+    return loss, accuracy
+
+
+# ---------------------------------------------------------------------------
+# Training / evaluation loops
+# ---------------------------------------------------------------------------
+
+def train_epoch(
+    model: TonicNet,
+    xs: list[torch.Tensor],
+    rs: list[torch.Tensor],
+    ps: list[torch.Tensor],
+    ys: list[torch.Tensor],
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+) -> tuple[float, float]:
+    model.train()
+    indices = np.random.permutation(len(xs)).tolist()
+    n_batches = (len(xs) + BATCH_SIZE - 1) // BATCH_SIZE
+    total_loss = 0.0
+    total_acc = 0.0
+
+    for b in range(n_batches):
+        batch_idx = indices[b * BATCH_SIZE : (b + 1) * BATCH_SIZE]
+        x, r, p, y = collate_batch(xs, rs, ps, ys, batch_idx)
+        x, r, p, y = x.to(device), r.to(device), p.to(device), y.to(device)
+
+        logits = model(x, r, p)
+        loss, acc = masked_loss_accuracy(logits, y)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+        total_acc += acc
+        print(f"\r  Batch {b+1}/{n_batches}", end="", flush=True)
+
+    return total_loss / n_batches, total_acc / n_batches
+
+
+@torch.no_grad()
+def evaluate(
+    model: TonicNet,
+    xs: list[torch.Tensor],
+    rs: list[torch.Tensor],
+    ps: list[torch.Tensor],
+    ys: list[torch.Tensor],
+    device: torch.device,
+) -> tuple[float, float]:
+    model.eval()
+    n_batches = (len(xs) + BATCH_SIZE - 1) // BATCH_SIZE
+    total_loss = 0.0
+    total_acc = 0.0
+
+    for b in range(n_batches):
+        batch_idx = list(range(b * BATCH_SIZE, min((b + 1) * BATCH_SIZE, len(xs))))
+        x, r, p, y = collate_batch(xs, rs, ps, ys, batch_idx)
+        x, r, p, y = x.to(device), r.to(device), p.to(device), y.to(device)
+
+        logits = model(x, r, p)
+        loss, acc = masked_loss_accuracy(logits, y)
+        total_loss += loss.item()
+        total_acc += acc
+
+    return total_loss / n_batches, total_acc / n_batches
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Train PyTorch TonicNet")
+    parser.add_argument("--weights", default=None,
+                        help="Resume from checkpoint (.pt file)")
+    parser.add_argument("--epochs", type=int, default=75)
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Overwrite existing best weights")
+    parser.add_argument("--out", default="tonicnet-best.pt",
+                        help="Output path for best checkpoint")
+    args = parser.parse_args()
+
+    if not args.overwrite and os.path.exists(args.out):
+        sys.exit(f"ERROR: {args.out} already exists. Use --overwrite to retrain.")
+
+    device = torch.device(
+        "cuda" if torch.cuda.is_available()
+        else "mps" if torch.backends.mps.is_available()
+        else "cpu"
+    )
+    print(f"Device: {device}")
+
+    print("Loading datasets...")
+    train_x, train_r, train_p, train_y = load_dataset("train")
+    val_x, val_r, val_p, val_y = load_dataset("valid")
+    print()
+
+    model = TonicNet()
+    if args.weights:
+        state_dict = torch.load(args.weights, map_location=device, weights_only=True)
+        model.load_state_dict(state_dict, strict=True)
+        print(f"Loaded weights from {args.weights}")
+    model.to(device)
+
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"Model parameters: {n_params:,}")
+
+    optimizer = torch.optim.Adam(model.parameters())
+    best_val_loss = float("inf")
+    t0 = time.time()
+
+    print(f"\nTraining for {args.epochs} epochs (batch_size={BATCH_SIZE})\n")
+
+    for epoch in range(1, args.epochs + 1):
+        epoch_t0 = time.time()
+
+        train_loss, train_acc = train_epoch(
+            model, train_x, train_r, train_p, train_y, optimizer, device)
+        val_loss, val_acc = evaluate(
+            model, val_x, val_r, val_p, val_y, device)
+
+        dt = datetime.timedelta(seconds=int(time.time() - epoch_t0))
+        print(f"\rEpoch {epoch:3d}  "
+              f"loss={train_loss:.4f}  acc={100*train_acc:.2f}%  "
+              f"val_loss={val_loss:.4f}  val_acc={100*val_acc:.2f}%  "
+              f"[{dt}]")
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), args.out)
+            print(f"  -> saved {args.out} (val_loss={val_loss:.4f})")
+
+    total = datetime.timedelta(seconds=int(time.time() - t0))
+    print(f"\nTraining complete in {total}")
+
+
+if __name__ == "__main__":
+    main()
