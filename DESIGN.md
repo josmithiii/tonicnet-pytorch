@@ -47,11 +47,28 @@ Trimming unused pitch ranges reduces vocabulary when articulations expand it.
 ### Chords as Input (`--chords-provided`)
 
 When training data includes a chord track, chords become conditioning input
-rather than predicted output — removes 50 chord tokens from the vocabulary.
+rather than predicted output — removes 50 chord tokens from the output
+vocabulary. The model learns voice leading in a single key (C/Am),
+conditioned on whatever chords appear.
 
-Combined with key normalization (transpose to C/Am), the chord input
-vocabulary drops from 48 to 4 (divides by 12 — one root × 4 qualities
-instead of 12 roots × 4 qualities).
+**How it works:**
+- All training data transposed to C major / A minor
+- Chord tokens are input conditioning, not predicted
+- No data augmentation by transposition (1× data instead of ~6×)
+- At inference: user provides any chord progression, model generates
+  voices in C/Am, then transpose to desired output key
+
+**The model never needs to "understand" key** — it just learns "given this
+chord, these are good voice movements." Since even pieces in C major use
+chords on all 12 chromatic roots (secondary dominants, borrowed chords,
+chromatic mediants, etc.), the model sees the full chord vocabulary during
+training. At inference it can follow any progression, including modulations.
+
+**Note:** the chord vocabulary itself does NOT shrink — all 12 roots × 4
+qualities still appear even in C major. What you save is:
+- 50 tokens removed from the output vocabulary (chords are not predicted)
+- No key augmentation needed during training
+- Pitch distribution is focused rather than spread across all keys
 
 ### MIDI Channel Mapping
 
@@ -71,14 +88,20 @@ Quantize to ~8 levels to keep vocabulary manageable.
 
 ## Future: Key Normalization
 
-Transpose all training data to C major / A minor. Currently the model
-learns each harmonic pattern 12 times (once per key); normalization
-learns it once.
+Two modes:
 
-- Pro: more data-efficient, smaller effective distribution
-- Pro: combined with `--chords-provided`, dramatically reduces vocabulary
+**With `--chords-provided`:** key normalization is built in — all training
+data is transposed to C/Am, and the model operates in a single key.
+Transposition to the desired output key happens after generation.
+
+**Without `--chords-provided` (standalone mode):** the model would need to
+predict chords and could benefit from key normalization independently.
+
+- Pro: learns each harmonic pattern once instead of 12 times
+- Pro: more data-efficient, focused pitch distribution
 - Con: requires key detection (music21 `analyze('key')`)
-- Con: modulations are tricky (Bach chorales are typically straightforward)
+- Con: modulations within a piece are tricky (Bach chorales are
+  typically straightforward)
 - Con: requires retraining — incompatible with current pretrained weights
 
 ---
