@@ -38,7 +38,10 @@ def find_checkpoint() -> str:
 
 if len(sys.argv) > 1:
     if sys.argv[1] in ['--train', '-t']:
-        train_TonicNet(3000, shuffle_batches=1, train_emb_freq=1, load_path='', batch_size=1)
+        load = ''
+        if '--resume' in sys.argv:
+            load = find_checkpoint()
+        train_TonicNet(3000, shuffle_batches=1, train_emb_freq=1, load_path=load, batch_size=1)
 
     elif sys.argv[1] in ['--plot', '-p']:
         plot_loss_acc_curves()
