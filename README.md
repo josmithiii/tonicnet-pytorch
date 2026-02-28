@@ -19,13 +19,29 @@ Sequences interleave 5 tokens per timestep: \[chord, soprano, bass, alto, tenor\
 ## Quick Start
 
 ```bash
+make setup      # create venv and install dependencies
+make generate   # generate 3 sample MIDI files
+make wav        # render sample_1.mid to WAV (requires: brew install fluid-synth)
+```
+
+Or without Make:
+
+```bash
 pip install torch music21 note-seq h5py numpy
-
-# Generate samples from pretrained weights
 python generate.py 3 --weights tonicnet-weights.pt
+```
 
-# Generate with fixed temperature
-python generate.py 1 --weights tonicnet-weights.pt --temperature 0.5
+## Make Targets
+
+```
+make help           Show all targets
+make setup          Create venv and install dependencies (uses uv)
+make generate       Generate 3 samples from pretrained weights
+make train          Fine-tune from pretrained weights (75 epochs)
+make train-scratch  Train from scratch (75 epochs)
+make convert        Convert TF2 .h5 weights to PyTorch .pt
+make wav            Render sample_1.mid to WAV (requires fluid-synth)
+make clean          Remove generated MIDI and WAV files
 ```
 
 ## Scripts
@@ -48,14 +64,9 @@ Produces `.mid` files with random tempo (65-85 QPM) and temperature (0.25-0.75 i
 ### Train
 
 ```bash
-# Train from scratch
-python train.py
-
-# Fine-tune from pretrained weights
-python train.py --weights tonicnet-weights.pt --epochs 75
-
-# Overwrite existing checkpoint
-python train.py --weights tonicnet-weights.pt --overwrite --out tonicnet-best.pt
+python train.py                                          # train from scratch
+python train.py --weights tonicnet-weights.pt --epochs 75  # fine-tune
+python train.py --overwrite --out tonicnet-best.pt         # overwrite checkpoint
 ```
 
 Expects `dataset_train.p`, `dataset_valid.p`, `dataset_test.p` (TF2-format pickle files) in the working directory.
@@ -63,7 +74,7 @@ Expects `dataset_train.p`, `dataset_valid.p`, `dataset_test.p` (TF2-format pickl
 ### Convert Weights
 
 ```bash
-python convert_weights.py path/to/tonicnet-weights.h5 tonicnet-weights.pt
+python convert_weights.py [input.h5] [output.pt]
 ```
 
 Handles GRU gate reordering (TF2 \[z,r,h\] to PyTorch \[r,z,n\]), kernel transposition, and bias splitting. Runs a forward-pass sanity check after conversion.
