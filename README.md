@@ -1,6 +1,6 @@
-# tonicnet-pytorch
+# TonicNet-PyTorch
 
-PyTorch reimplementation of **TonicNet** — a GRU-based polyphonic music model for 4-part Bach chorale generation.
+PyTorch reimplementation of **TonicNet** -- a GRU-based polyphonic music model for 4-part Bach chorale generation.
 
 Based on the paper [Improving Polyphonic Music Models with Feature-Rich Encoding](https://arxiv.org/abs/1911.11775) (Peracha, 2019) and ported from the [TF2 reimplementation](https://github.com/AI-Guru/tonicnet) by Tristan Behrens.
 
@@ -59,12 +59,12 @@ make clean          Remove generated MIDI and WAV files
 python generate.py [n_samples] [--weights PATH] [--temperature T]
 ```
 
-Produces `.mid` files with random tempo (65-85 QPM) and temperature (0.25-0.75 if not fixed). Uses MPS/CUDA when available.
+Produces MIDI files (`.mid` ) with random tempo (65-85 QPM) and temperature (0.25-0.75 if not fixed). Uses MPS/CUDA when available.
 
 ### Train
 
 ```bash
-python train.py                                          # train from scratch
+python train.py                                            # train from scratch
 python train.py --weights tonicnet-weights.pt --epochs 75  # fine-tune
 python train.py --overwrite --out tonicnet-best.pt         # overwrite checkpoint
 ```

@@ -8,9 +8,8 @@ help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 
-setup: $(VENV)  ## Create venv and install dependencies
-$(VENV):
-	uv venv $(VENV)
+setup:  ## Create venv and install dependencies
+	@test -d $(VENV) || uv venv $(VENV)
 	uv pip install --python $(PYTHON) torch numpy music21 note-seq h5py
 	@echo "Done. Activate with: source $(VENV)/bin/activate"
 
