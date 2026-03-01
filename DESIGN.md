@@ -1,6 +1,6 @@
 # TonicNet-PyTorch Design Notes
 
-## Current Architecture (v1)
+## Current Architecture (v2 — Causal Transformer)
 
 99-token flat vocabulary, 5 tokens per timestep at 16th-note resolution:
 
@@ -13,7 +13,15 @@ Tokens:
 - 2-51: chords (12 roots × 4 qualities + other + rest)
 - 52-98: pitches (MIDI 36-81 + rest), shared across all voices
 
-3-layer GRU (hidden=100), repetition/position embeddings, skip connections.
+4-layer pre-norm causal Transformer (d_model=128, 4 heads, dff=512, ~841K params).
+Sinusoidal position encoding (max 3072 tokens). Embeddings: x→100d, r→32d, p→8d,
+concatenated to 140d, projected to 128d. Output skip connection: cat(transformer_out,
+r_emb, p_emb) → Linear(168, 99). KV-cache for autoregressive generation.
+
+Training: AdamW (lr=3e-4, weight_decay=0.01), linear warmup (500 steps) + cosine
+decay to 1e-5, gradient clipping (max_norm=1.0), 150 epochs.
+
+Previous architecture (v1): 3-layer GRU (hidden=100, ~220K params).
 
 ---
 

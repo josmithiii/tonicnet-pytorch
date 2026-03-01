@@ -4,12 +4,13 @@
 Usage:
     python train.py                         # train from scratch
     python train.py --weights ckpt.pt       # resume from checkpoint
-    python train.py --epochs 100            # custom epoch count
+    python train.py --epochs 150            # custom epoch count
     python train.py --overwrite             # overwrite existing best weights
 """
 
 import argparse
 import datetime
+import math
 import os
 import pickle
 import sys
@@ -93,18 +94,26 @@ def collate_batch(
     ps: list[torch.Tensor],
     ys: list[torch.Tensor],
     indices: list[int],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Pad a batch of variable-length sequences. Targets padded with PAD_VALUE."""
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Pad a batch of variable-length sequences.
+
+    Returns (x, r, p, y, pad_mask) where pad_mask is True for valid positions.
+    """
     batch_x = [xs[i] for i in indices]
     batch_r = [rs[i] for i in indices]
     batch_p = [ps[i] for i in indices]
     batch_y = [ys[i] for i in indices]
 
+    lengths = torch.tensor([len(s) for s in batch_x])
+
     x = nn.utils.rnn.pad_sequence(batch_x, batch_first=True, padding_value=0)
     r = nn.utils.rnn.pad_sequence(batch_r, batch_first=True, padding_value=0)
     p = nn.utils.rnn.pad_sequence(batch_p, batch_first=True, padding_value=0)
     y = nn.utils.rnn.pad_sequence(batch_y, batch_first=True, padding_value=PAD_VALUE)
-    return x, r, p, y
+
+    # pad_mask: True for valid positions, False for padding
+    pad_mask = torch.arange(x.size(1)).unsqueeze(0) < lengths.unsqueeze(1)
+    return x, r, p, y, pad_mask
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +139,19 @@ def masked_loss_accuracy(
 
 
 # ---------------------------------------------------------------------------
+# LR schedule: linear warmup + cosine decay
+# ---------------------------------------------------------------------------
+
+def lr_lambda(step: int, warmup_steps: int, total_steps: int, min_lr: float, max_lr: float) -> float:
+    """Returns multiplier for LambdaLR (applied to base lr = max_lr)."""
+    if step < warmup_steps:
+        return step / max(1, warmup_steps)
+    progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return max(min_lr / max_lr, cosine)
+
+
+# ---------------------------------------------------------------------------
 # Training / evaluation loops
 # ---------------------------------------------------------------------------
 
@@ -140,6 +162,7 @@ def train_epoch(
     ps: list[torch.Tensor],
     ys: list[torch.Tensor],
     optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
     device: torch.device,
 ) -> tuple[float, float]:
     model.train()
@@ -150,15 +173,18 @@ def train_epoch(
 
     for b in range(n_batches):
         batch_idx = indices[b * BATCH_SIZE : (b + 1) * BATCH_SIZE]
-        x, r, p, y = collate_batch(xs, rs, ps, ys, batch_idx)
+        x, r, p, y, pad_mask = collate_batch(xs, rs, ps, ys, batch_idx)
         x, r, p, y = x.to(device), r.to(device), p.to(device), y.to(device)
+        pad_mask = pad_mask.to(device)
 
-        logits = model(x, r, p)
+        logits = model(x, r, p, pad_mask=pad_mask)
         loss, acc = masked_loss_accuracy(logits, y)
 
         optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
+        scheduler.step()
 
         total_loss += loss.item()
         total_acc += acc
@@ -183,10 +209,11 @@ def evaluate(
 
     for b in range(n_batches):
         batch_idx = list(range(b * BATCH_SIZE, min((b + 1) * BATCH_SIZE, len(xs))))
-        x, r, p, y = collate_batch(xs, rs, ps, ys, batch_idx)
+        x, r, p, y, pad_mask = collate_batch(xs, rs, ps, ys, batch_idx)
         x, r, p, y = x.to(device), r.to(device), p.to(device), y.to(device)
+        pad_mask = pad_mask.to(device)
 
-        logits = model(x, r, p)
+        logits = model(x, r, p, pad_mask=pad_mask)
         loss, acc = masked_loss_accuracy(logits, y)
         total_loss += loss.item()
         total_acc += acc
@@ -202,7 +229,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train PyTorch TonicNet")
     parser.add_argument("--weights", default=None,
                         help="Resume from checkpoint (.pt file)")
-    parser.add_argument("--epochs", type=int, default=75)
+    parser.add_argument("--epochs", type=int, default=150)
     parser.add_argument("--overwrite", action="store_true",
                         help="Overwrite existing best weights")
     parser.add_argument("--out", default="tonicnet-best.pt",
@@ -234,25 +261,39 @@ def main() -> None:
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {n_params:,}")
 
-    optimizer = torch.optim.Adam(model.parameters())
+    # AdamW with linear warmup + cosine decay
+    max_lr = 3e-4
+    min_lr = 1e-5
+    warmup_steps = 500
+    n_batches_per_epoch = (len(train_x) + BATCH_SIZE - 1) // BATCH_SIZE
+    total_steps = args.epochs * n_batches_per_epoch
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=max_lr, weight_decay=0.01)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=lambda step: lr_lambda(step, warmup_steps, total_steps, min_lr, max_lr),
+    )
+
     best_val_loss = float("inf")
     t0 = time.time()
 
-    print(f"\nTraining for {args.epochs} epochs (batch_size={BATCH_SIZE})\n")
+    print(f"\nTraining for {args.epochs} epochs (batch_size={BATCH_SIZE}, "
+          f"{n_batches_per_epoch} batches/epoch, {total_steps} total steps)\n")
 
     for epoch in range(1, args.epochs + 1):
         epoch_t0 = time.time()
 
         train_loss, train_acc = train_epoch(
-            model, train_x, train_r, train_p, train_y, optimizer, device)
+            model, train_x, train_r, train_p, train_y, optimizer, scheduler, device)
         val_loss, val_acc = evaluate(
             model, val_x, val_r, val_p, val_y, device)
 
+        current_lr = scheduler.get_last_lr()[0]
         dt = datetime.timedelta(seconds=int(time.time() - epoch_t0))
         print(f"\rEpoch {epoch:3d}  "
               f"loss={train_loss:.4f}  acc={100*train_acc:.2f}%  "
               f"val_loss={val_loss:.4f}  val_acc={100*val_acc:.2f}%  "
-              f"[{dt}]")
+              f"lr={current_lr:.2e}  [{dt}]")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss

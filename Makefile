@@ -2,7 +2,7 @@ VENV := .venv
 PYTHON := $(VENV)/bin/python
 SOUNDFONT ?= $(firstword $(wildcard /opt/homebrew/Cellar/fluid-synth/*/share/fluid-synth/sf2/VintageDreamsWaves-v2.sf2 /usr/local/share/fluidsynth/default_sound_font.sf2))
 
-.PHONY: help setup generate train convert wav clean distclean
+.PHONY: help setup generate train train-scratch wav clean distclean
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -13,19 +13,13 @@ setup:  ## Create venv and install dependencies
 	uv pip install --python $(PYTHON) torch numpy music21 note-seq h5py
 	@echo "Done. Activate with: source $(VENV)/bin/activate"
 
-convert: setup  ## Convert TF2 .h5 weights to PyTorch .pt
-	$(PYTHON) convert_weights.py
+generate: setup  ## Generate 3 samples from trained weights
+	$(PYTHON) generate.py 3 --weights tonicnet-best.pt
 
-tonicnet-weights.pt: setup
-	$(PYTHON) convert_weights.py
+train: setup  ## Train from scratch (150 epochs)
+	$(PYTHON) train.py --epochs 150 --overwrite
 
-generate: setup  ## Generate 3 samples from pretrained weights
-	$(PYTHON) generate.py 3 --weights tonicnet-weights.pt
-
-train: setup  ## Fine-tune from pretrained weights (75 epochs)
-	$(PYTHON) train.py --weights tonicnet-weights.pt --overwrite
-
-train-scratch: setup  ## Train from scratch (75 epochs)
+train-scratch: setup  ## Train from scratch (150 epochs, alias)
 	$(PYTHON) train.py --overwrite
 
 sample_1.wav: sample_1.mid
