@@ -102,13 +102,18 @@ def main() -> None:
                         help="Path to .pt weights (default: tonicnet-best.pt)")
     parser.add_argument("--temperature", type=float, default=0.0,
                         help="Fixed temperature (default: random 0.25-0.75)")
+    parser.add_argument("--gpu", action="store_true",
+                        help="Use GPU instead of CPU for generation")
     args = parser.parse_args()
 
-    device = torch.device(
-        "cuda" if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available()
-        else "cpu"
-    )
+    if args.gpu:
+        device = torch.device(
+            "cuda" if torch.cuda.is_available()
+            else "mps" if torch.backends.mps.is_available()
+            else "cpu"
+        )
+    else:
+        device = torch.device("cpu")
 
     model = TonicNet()
     state_dict = torch.load(args.weights, map_location=device, weights_only=True)

@@ -111,6 +111,11 @@ class CausalSelfAttention(nn.Module):
             v = torch.cat([kv_cache[1], v], dim=2)
         new_cache = (k, v)
 
+        # MPS SDPA crashes with attn_mask=None; provide explicit zero mask
+        if attn_mask is None:
+            attn_mask = torch.zeros(1, 1, q.size(2), k.size(2),
+                                    device=q.device, dtype=q.dtype)
+
         drop = self.dropout if self.training else 0.0
         out = F.scaled_dot_product_attention(
             q, k, v, attn_mask=attn_mask, dropout_p=drop, is_causal=False,
