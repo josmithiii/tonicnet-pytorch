@@ -8,6 +8,7 @@ repetition/position embeddings, output skip connection.
 
 import itertools
 import math
+import sys
 
 import music21
 import torch
@@ -38,6 +39,24 @@ assert len(VOCABULARY) == 99, f"Expected 99 tokens, got {len(VOCABULARY)}"
 
 SONG_START = VOCABULARY.index("song_start")  # 0
 SONG_END = VOCABULARY.index("song_end")      # 1
+
+MODEL_VERSION = 4  # bump when architecture changes (v4 = Transformer + countdown)
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint I/O
+# ---------------------------------------------------------------------------
+
+def load_checkpoint(path: str, device: torch.device) -> dict[str, torch.Tensor]:
+    """Load a versioned checkpoint, failing fast on version mismatch."""
+    data = torch.load(path, map_location=device, weights_only=False)
+    if isinstance(data, dict) and "version" in data:
+        if data["version"] != MODEL_VERSION:
+            sys.exit(f"ERROR: {path} is version {data['version']}, "
+                     f"expected {MODEL_VERSION}. Retrain required.")
+        return data["state_dict"]
+    sys.exit(f"ERROR: {path} has no version field (pre-v4 checkpoint). "
+             f"Retrain required.")
 
 
 # ---------------------------------------------------------------------------

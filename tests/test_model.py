@@ -1,9 +1,12 @@
 """Tests for the causal Transformer TonicNet model."""
 
+import tempfile
+from pathlib import Path
+
 import torch
 import pytest
 
-from model import TonicNet, SONG_START, SONG_END
+from model import TonicNet, SONG_START, SONG_END, MODEL_VERSION, load_checkpoint
 
 
 @pytest.fixture
@@ -140,3 +143,31 @@ def test_param_count(model: TonicNet) -> None:
     """Parameter count in expected range (700K-1.2M)."""
     n = sum(p.numel() for p in model.parameters())
     assert 700_000 <= n <= 1_200_000, f"Parameter count {n:,} out of range"
+
+
+def test_checkpoint_roundtrip(model: TonicNet) -> None:
+    """Save versioned checkpoint, load back, verify weights match."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = str(Path(tmp) / "test.pt")
+        torch.save({"version": MODEL_VERSION, "state_dict": model.state_dict()}, path)
+        loaded = load_checkpoint(path, torch.device("cpu"))
+        for key in model.state_dict():
+            assert torch.equal(model.state_dict()[key], loaded[key]), f"Mismatch on {key}"
+
+
+def test_checkpoint_version_mismatch() -> None:
+    """Wrong version in checkpoint → SystemExit."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = str(Path(tmp) / "bad.pt")
+        torch.save({"version": MODEL_VERSION - 1, "state_dict": {}}, path)
+        with pytest.raises(SystemExit):
+            load_checkpoint(path, torch.device("cpu"))
+
+
+def test_checkpoint_no_version() -> None:
+    """Pre-v4 bare state_dict checkpoint → SystemExit."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = str(Path(tmp) / "old.pt")
+        torch.save({"some_key": torch.zeros(1)}, path)
+        with pytest.raises(SystemExit):
+            load_checkpoint(path, torch.device("cpu"))

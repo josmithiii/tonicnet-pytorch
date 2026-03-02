@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model import VOCABULARY, SONG_START, SONG_END, TonicNet
+from model import VOCABULARY, SONG_START, SONG_END, MODEL_VERSION, load_checkpoint, TonicNet
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +272,7 @@ def main() -> None:
 
     model = TonicNet()
     if args.weights:
-        state_dict = torch.load(args.weights, map_location=device, weights_only=True)
+        state_dict = load_checkpoint(args.weights, device)
         model.load_state_dict(state_dict, strict=True)
         print(f"Loaded weights from {args.weights}")
     model.to(device)
@@ -337,7 +337,7 @@ def main() -> None:
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), args.out)
+            torch.save({"version": MODEL_VERSION, "state_dict": model.state_dict()}, args.out)
             print(f"  -> saved {args.out} (val_loss={val_loss:.4f})")
 
     log_file.close()

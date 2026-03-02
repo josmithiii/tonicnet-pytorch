@@ -12,7 +12,7 @@ import note_seq
 import numpy as np
 import torch
 
-from model import VOCABULARY, TonicNet
+from model import VOCABULARY, load_checkpoint, TonicNet
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ def main() -> None:
         device = torch.device("cpu")
 
     model = TonicNet()
-    state_dict = torch.load(args.weights, map_location=device, weights_only=True)
+    state_dict = load_checkpoint(args.weights, device)
     model.load_state_dict(state_dict, strict=True)
     model.to(device)
     model.eval()
