@@ -162,7 +162,7 @@ class TransformerBlock(nn.Module):
 # ---------------------------------------------------------------------------
 
 class TonicNet(nn.Module):
-    """Causal Transformer for polyphonic music with repetition/position embeddings."""
+    """Causal Transformer for polyphonic music with repetition/position/countdown embeddings."""
 
     def __init__(
         self,
@@ -172,6 +172,8 @@ class TonicNet(nn.Module):
         r_dim: int = 32,
         p_tokens: int = 16,
         p_dim: int = 8,
+        c_tokens: int = 48,
+        c_dim: int = 8,
         d_model: int = 128,
         n_heads: int = 4,
         n_layers: int = 4,
@@ -185,13 +187,16 @@ class TonicNet(nn.Module):
         self.n_layers = n_layers
         self.r_dim = r_dim
         self.p_dim = p_dim
+        self.c_dim = c_dim
+        self.c_tokens = c_tokens
 
         # Embeddings
         self.embedding_x = nn.Embedding(vocab_size, x_dim)
         self.embedding_r = nn.Embedding(r_tokens, r_dim)
         self.embedding_p = nn.Embedding(p_tokens, p_dim)
+        self.embedding_c = nn.Embedding(c_tokens, c_dim)
 
-        input_dim = x_dim + r_dim + p_dim  # 140
+        input_dim = x_dim + r_dim + p_dim + c_dim  # 148
         self.input_proj = nn.Linear(input_dim, d_model)
 
         # Sinusoidal position encoding (not learned)
@@ -205,8 +210,8 @@ class TonicNet(nn.Module):
         self.ln_final = nn.LayerNorm(d_model)
         self.drop_in = nn.Dropout(dropout)
 
-        # Output: skip connection with r/p embeddings
-        self.dense = nn.Linear(d_model + r_dim + p_dim, vocab_size)
+        # Output: skip connection with r/p/c embeddings
+        self.dense = nn.Linear(d_model + r_dim + p_dim + c_dim, vocab_size)
 
         self._init_weights()
 
@@ -224,15 +229,17 @@ class TonicNet(nn.Module):
         x: torch.Tensor,
         r: torch.Tensor,
         p: torch.Tensor,
+        c: torch.Tensor,
         pad_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Forward pass for training (full sequences).
 
         Args:
-            x: token indices   [batch, seq_len]
-            r: repetition ids  [batch, seq_len]
-            p: position ids    [batch, seq_len]
-            pad_mask: bool tensor [batch, seq_len], True = valid token
+            x: token indices       [batch, seq_len]
+            r: repetition ids      [batch, seq_len]
+            p: position ids        [batch, seq_len]
+            c: countdown (bars remaining) [batch, seq_len]
+            pad_mask: bool tensor  [batch, seq_len], True = valid token
 
         Returns:
             logits [batch, seq_len, vocab_size]
@@ -241,8 +248,9 @@ class TonicNet(nn.Module):
         x_emb = self.embedding_x(x)
         r_emb = self.embedding_r(r)
         p_emb = self.embedding_p(p)
+        c_emb = self.embedding_c(c)
 
-        h = self.input_proj(torch.cat([x_emb, r_emb, p_emb], dim=-1))
+        h = self.input_proj(torch.cat([x_emb, r_emb, p_emb, c_emb], dim=-1))
         h = h + self.pos_enc[:, :S, :]
         h = self.drop_in(h)
 
@@ -253,30 +261,38 @@ class TonicNet(nn.Module):
 
         h = self.ln_final(h)
 
-        # Skip connection: concat transformer output with r and p embeddings
-        h = torch.cat([h, r_emb, p_emb], dim=-1)
+        # Skip connection: concat transformer output with r, p, c embeddings
+        h = torch.cat([h, r_emb, p_emb, c_emb], dim=-1)
         return self.dense(h)
 
     @torch.no_grad()
     def generate(
         self,
-        max_steps: int = 4096,
+        bars: int,
         temperature: float = 0.5,
         stop_on_end: bool = True,
-    ) -> tuple[list[int], list[int], list[int]]:
+    ) -> tuple[list[int], list[int], list[int], list[int]]:
         """Autoregressive sampling with KV-cache.
 
+        Args:
+            bars: desired length in bars (used for countdown conditioning
+                  and max_steps = bars * 80 + 80).
+            temperature: sampling temperature.
+            stop_on_end: stop when song_end token is generated.
+
         Returns:
-            (x_sequence, r_sequence, p_sequence)
+            (x_sequence, r_sequence, p_sequence, c_sequence)
         """
         self.eval()
         device = next(self.parameters()).device
+        max_steps = bars * 80 + 80  # one extra bar of slack for song_end
 
         x = SONG_START
         r = 0
         x_sequence = [x]
         r_sequence = [r]
         p_sequence: list[int] = []
+        c_sequence: list[int] = []
 
         # Per-layer KV cache: list of (K, V) tuples
         kv_caches: list[tuple[torch.Tensor, torch.Tensor] | None] = [
@@ -286,16 +302,20 @@ class TonicNet(nn.Module):
         for index in range(max_steps):
             p = 0 if index == 0 else (index - 1) // 5 % 16
             p_sequence.append(p)
+            c_val = max(0, min(self.c_tokens - 1, bars - 1 - index // 80))
+            c_sequence.append(c_val)
 
             x_t = torch.tensor([[x]], device=device)
             r_t = torch.tensor([[r]], device=device)
             p_t = torch.tensor([[p]], device=device)
+            c_t = torch.tensor([[c_val]], device=device)
 
             x_emb = self.embedding_x(x_t)
             r_emb = self.embedding_r(r_t)
             p_emb = self.embedding_p(p_t)
+            c_emb = self.embedding_c(c_t)
 
-            h = self.input_proj(torch.cat([x_emb, r_emb, p_emb], dim=-1))
+            h = self.input_proj(torch.cat([x_emb, r_emb, p_emb, c_emb], dim=-1))
             h = h + self.pos_enc[:, index:index + 1, :]
 
             # No causal mask needed: single query, KV-cache has only past
@@ -304,7 +324,7 @@ class TonicNet(nn.Module):
                 kv_caches[i] = new_cache
 
             h = self.ln_final(h)
-            h = torch.cat([h, r_emb, p_emb], dim=-1)
+            h = torch.cat([h, r_emb, p_emb, c_emb], dim=-1)
             logits = self.dense(h).squeeze(0) / temperature
             probs = torch.softmax(logits, dim=-1)
             x = torch.multinomial(probs, 1).item()
@@ -322,4 +342,4 @@ class TonicNet(nn.Module):
             if stop_on_end and x == SONG_END:
                 break
 
-        return x_sequence, r_sequence, p_sequence
+        return x_sequence, r_sequence, p_sequence, c_sequence

@@ -14,7 +14,7 @@ setup:  ## Create venv and install dependencies
 	@echo "Done. Activate with: source $(VENV)/bin/activate"
 
 generate: setup  ## Generate 3 samples from trained weights
-	$(PYTHON) generate.py 3 --weights tonicnet-best.pt
+	$(PYTHON) generate.py 3 --weights tonicnet-best.pt --bars 16
 
 train: setup  ## Fine-tune from existing weights (150 epochs)
 	$(PYTHON) train.py --weights tonicnet-best.pt --overwrite --epochs 150

@@ -17,7 +17,8 @@ def test_forward_shape(model: TonicNet) -> None:
     x = torch.randint(0, 99, (B, S))
     r = torch.randint(0, 80, (B, S))
     p = torch.randint(0, 16, (B, S))
-    logits = model(x, r, p)
+    c = torch.randint(0, 48, (B, S))
+    logits = model(x, r, p, c)
     assert logits.shape == (B, S, 99)
 
 
@@ -27,9 +28,10 @@ def test_forward_with_pad_mask(model: TonicNet) -> None:
     x = torch.randint(0, 99, (B, S))
     r = torch.randint(0, 80, (B, S))
     p = torch.randint(0, 16, (B, S))
+    c = torch.randint(0, 48, (B, S))
     pad_mask = torch.ones(B, S, dtype=torch.bool)
     pad_mask[1, 30:] = False  # second sequence is shorter
-    logits = model(x, r, p, pad_mask=pad_mask)
+    logits = model(x, r, p, c, pad_mask=pad_mask)
     assert logits.shape == (B, S, 99)
 
 
@@ -40,13 +42,14 @@ def test_causal_masking(model: TonicNet) -> None:
     x = torch.randint(0, 99, (1, S))
     r = torch.randint(0, 80, (1, S))
     p = torch.randint(0, 16, (1, S))
+    c = torch.randint(0, 48, (1, S))
 
-    logits1 = model(x, r, p)
+    logits1 = model(x, r, p, c)
 
     # Modify the last 5 tokens
     x2 = x.clone()
     x2[0, 15:] = torch.randint(0, 99, (5,))
-    logits2 = model(x2, r, p)
+    logits2 = model(x2, r, p, c)
 
     # First 15 positions should be identical
     assert torch.allclose(logits1[0, :15], logits2[0, :15], atol=1e-5)
@@ -54,13 +57,35 @@ def test_causal_masking(model: TonicNet) -> None:
 
 def test_generate_basic(model: TonicNet) -> None:
     """Generate produces valid sequences starting with song_start."""
-    x_seq, r_seq, p_seq = model.generate(max_steps=20, temperature=0.8)
+    x_seq, r_seq, p_seq, c_seq = model.generate(bars=4, temperature=0.8)
     assert x_seq[0] == SONG_START
     assert len(x_seq) >= 2  # at least start + one generated token
     assert len(r_seq) == len(x_seq)
     assert len(p_seq) == len(x_seq) - 1  # p has one fewer (no final p)
+    assert len(c_seq) == len(x_seq) - 1  # c has one fewer (no final c)
     # All tokens in valid range
     assert all(0 <= t < 99 for t in x_seq)
+    # Countdown values in valid range
+    assert all(0 <= v < 48 for v in c_seq)
+
+
+def test_countdown_affects_output(model: TonicNet) -> None:
+    """Same input with different countdown values produces different logits."""
+    model.eval()
+    B, S = 1, 20
+    x = torch.randint(0, 99, (B, S))
+    r = torch.randint(0, 80, (B, S))
+    p = torch.randint(0, 16, (B, S))
+
+    c1 = torch.full((B, S), 0, dtype=torch.long)   # final bar
+    c2 = torch.full((B, S), 30, dtype=torch.long)   # 30 bars remaining
+
+    logits1 = model(x, r, p, c1)
+    logits2 = model(x, r, p, c2)
+
+    # Logits should differ (different conditioning)
+    assert not torch.allclose(logits1, logits2, atol=1e-5), \
+        "Countdown conditioning had no effect on output"
 
 
 def test_kv_cache_matches_full(model: TonicNet) -> None:
@@ -72,9 +97,10 @@ def test_kv_cache_matches_full(model: TonicNet) -> None:
     x = torch.randint(0, 99, (1, S))
     r = torch.randint(0, 80, (1, S))
     p = torch.randint(0, 16, (1, S))
+    c = torch.randint(0, 48, (1, S))
 
     # Full forward pass
-    full_logits = model(x, r, p)  # [1, S, 99]
+    full_logits = model(x, r, p, c)  # [1, S, 99]
 
     # Step-by-step with KV-cache
     kv_caches: list[tuple[torch.Tensor, torch.Tensor] | None] = [
@@ -86,12 +112,14 @@ def test_kv_cache_matches_full(model: TonicNet) -> None:
         x_t = x[:, t:t + 1]
         r_t = r[:, t:t + 1]
         p_t = p[:, t:t + 1]
+        c_t = c[:, t:t + 1]
 
         x_emb = model.embedding_x(x_t)
         r_emb = model.embedding_r(r_t)
         p_emb = model.embedding_p(p_t)
+        c_emb = model.embedding_c(c_t)
 
-        h = model.input_proj(torch.cat([x_emb, r_emb, p_emb], dim=-1))
+        h = model.input_proj(torch.cat([x_emb, r_emb, p_emb, c_emb], dim=-1))
         h = h + model.pos_enc[:, t:t + 1, :]
 
         for i, layer in enumerate(model.layers):
@@ -99,7 +127,7 @@ def test_kv_cache_matches_full(model: TonicNet) -> None:
             kv_caches[i] = new_cache
 
         h = model.ln_final(h)
-        h = torch.cat([h, r_emb, p_emb], dim=-1)
+        h = torch.cat([h, r_emb, p_emb, c_emb], dim=-1)
         logit = model.dense(h)
         step_logits.append(logit)
 

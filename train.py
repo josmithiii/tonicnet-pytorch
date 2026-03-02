@@ -62,22 +62,35 @@ def compute_positions(sequence: list[int] | np.ndarray) -> list[int]:
     return [0] + [index // 5 % 16 for index in range(len(sequence) - 1)]
 
 
-def to_supervised(songs: list[np.ndarray]) -> tuple[list, list, list, list]:
-    """Convert songs to (x, r, p, y) sequences for teacher forcing."""
-    xs, rs, ps, ys = [], [], [], []
+def compute_countdown(sequence: list[int] | np.ndarray, c_tokens: int = 48) -> list[int]:
+    """Compute bars-remaining countdown per token position.
+
+    80 tokens per bar (5 tokens/timestep × 16 timesteps/bar).
+    c[i] = clamp(total_bars - 1 - i // 80, 0, c_tokens - 1).
+    """
+    n = len(sequence)
+    total_bars = math.ceil(n / 80)
+    return [max(0, min(c_tokens - 1, total_bars - 1 - i // 80)) for i in range(n)]
+
+
+def to_supervised(songs: list[np.ndarray]) -> tuple[list, list, list, list, list]:
+    """Convert songs to (x, r, p, c, y) sequences for teacher forcing."""
+    xs, rs, ps, cs, ys = [], [], [], [], []
     for song in songs:
         x = song[:-1]
         y = song[1:]
         r = compute_repetitions(x.tolist())
         p = compute_positions(x.tolist())
+        c = compute_countdown(x.tolist())
         xs.append(torch.tensor(x, dtype=torch.long))
         rs.append(torch.tensor(r, dtype=torch.long))
         ps.append(torch.tensor(p, dtype=torch.long))
+        cs.append(torch.tensor(c, dtype=torch.long))
         ys.append(torch.tensor(y, dtype=torch.long))
-    return xs, rs, ps, ys
+    return xs, rs, ps, cs, ys
 
 
-def load_dataset(name: str) -> tuple[list, list, list, list]:
+def load_dataset(name: str) -> tuple[list, list, list, list, list]:
     """Load a pickle dataset and convert to supervised tensors."""
     assert name in ("train", "valid", "test"), name
     filename = f"dataset_{name}.p"
@@ -93,16 +106,18 @@ def collate_batch(
     xs: list[torch.Tensor],
     rs: list[torch.Tensor],
     ps: list[torch.Tensor],
+    cs: list[torch.Tensor],
     ys: list[torch.Tensor],
     indices: list[int],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Pad a batch of variable-length sequences.
 
-    Returns (x, r, p, y, pad_mask) where pad_mask is True for valid positions.
+    Returns (x, r, p, c, y, pad_mask) where pad_mask is True for valid positions.
     """
     batch_x = [xs[i] for i in indices]
     batch_r = [rs[i] for i in indices]
     batch_p = [ps[i] for i in indices]
+    batch_c = [cs[i] for i in indices]
     batch_y = [ys[i] for i in indices]
 
     lengths = torch.tensor([len(s) for s in batch_x])
@@ -110,11 +125,12 @@ def collate_batch(
     x = nn.utils.rnn.pad_sequence(batch_x, batch_first=True, padding_value=0)
     r = nn.utils.rnn.pad_sequence(batch_r, batch_first=True, padding_value=0)
     p = nn.utils.rnn.pad_sequence(batch_p, batch_first=True, padding_value=0)
+    c = nn.utils.rnn.pad_sequence(batch_c, batch_first=True, padding_value=0)
     y = nn.utils.rnn.pad_sequence(batch_y, batch_first=True, padding_value=PAD_VALUE)
 
     # pad_mask: True for valid positions, False for padding
     pad_mask = torch.arange(x.size(1)).unsqueeze(0) < lengths.unsqueeze(1)
-    return x, r, p, y, pad_mask
+    return x, r, p, c, y, pad_mask
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +177,7 @@ def train_epoch(
     xs: list[torch.Tensor],
     rs: list[torch.Tensor],
     ps: list[torch.Tensor],
+    cs: list[torch.Tensor],
     ys: list[torch.Tensor],
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
@@ -174,11 +191,11 @@ def train_epoch(
 
     for b in range(n_batches):
         batch_idx = indices[b * BATCH_SIZE : (b + 1) * BATCH_SIZE]
-        x, r, p, y, pad_mask = collate_batch(xs, rs, ps, ys, batch_idx)
-        x, r, p, y = x.to(device), r.to(device), p.to(device), y.to(device)
+        x, r, p, c, y, pad_mask = collate_batch(xs, rs, ps, cs, ys, batch_idx)
+        x, r, p, c, y = x.to(device), r.to(device), p.to(device), c.to(device), y.to(device)
         pad_mask = pad_mask.to(device)
 
-        logits = model(x, r, p, pad_mask=pad_mask)
+        logits = model(x, r, p, c, pad_mask=pad_mask)
         loss, acc = masked_loss_accuracy(logits, y)
 
         optimizer.zero_grad()
@@ -200,6 +217,7 @@ def evaluate(
     xs: list[torch.Tensor],
     rs: list[torch.Tensor],
     ps: list[torch.Tensor],
+    cs: list[torch.Tensor],
     ys: list[torch.Tensor],
     device: torch.device,
 ) -> tuple[float, float]:
@@ -210,11 +228,11 @@ def evaluate(
 
     for b in range(n_batches):
         batch_idx = list(range(b * BATCH_SIZE, min((b + 1) * BATCH_SIZE, len(xs))))
-        x, r, p, y, pad_mask = collate_batch(xs, rs, ps, ys, batch_idx)
-        x, r, p, y = x.to(device), r.to(device), p.to(device), y.to(device)
+        x, r, p, c, y, pad_mask = collate_batch(xs, rs, ps, cs, ys, batch_idx)
+        x, r, p, c, y = x.to(device), r.to(device), p.to(device), c.to(device), y.to(device)
         pad_mask = pad_mask.to(device)
 
-        logits = model(x, r, p, pad_mask=pad_mask)
+        logits = model(x, r, p, c, pad_mask=pad_mask)
         loss, acc = masked_loss_accuracy(logits, y)
         total_loss += loss.item()
         total_acc += acc
@@ -248,8 +266,8 @@ def main() -> None:
     print(f"Device: {device}")
 
     print("Loading datasets...")
-    train_x, train_r, train_p, train_y = load_dataset("train")
-    val_x, val_r, val_p, val_y = load_dataset("valid")
+    train_x, train_r, train_p, train_c, train_y = load_dataset("train")
+    val_x, val_r, val_p, val_c, val_y = load_dataset("valid")
     print()
 
     model = TonicNet()
@@ -294,9 +312,9 @@ def main() -> None:
         epoch_t0 = time.time()
 
         train_loss, train_acc = train_epoch(
-            model, train_x, train_r, train_p, train_y, optimizer, scheduler, device)
+            model, train_x, train_r, train_p, train_c, train_y, optimizer, scheduler, device)
         val_loss, val_acc = evaluate(
-            model, val_x, val_r, val_p, val_y, device)
+            model, val_x, val_r, val_p, val_c, val_y, device)
 
         current_lr = scheduler.get_last_lr()[0]
         epoch_secs = int(time.time() - epoch_t0)

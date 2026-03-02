@@ -102,6 +102,8 @@ def main() -> None:
                         help="Path to .pt weights (default: tonicnet-best.pt)")
     parser.add_argument("--temperature", type=float, default=0.0,
                         help="Fixed temperature (default: random 0.25-0.75)")
+    parser.add_argument("--bars", type=int, default=16,
+                        help="Desired length in bars (default: 16)")
     parser.add_argument("--gpu", action="store_true",
                         help="Use GPU instead of CPU for generation")
     args = parser.parse_args()
@@ -127,9 +129,8 @@ def main() -> None:
         qpm = int(np.random.uniform(65, 85))
         print(f"\nSample {i+1}/{args.n_samples}  temperature={temperature:.2f}  qpm={qpm}")
 
-        bars = 64
-        seq, reps, pos = model.generate(
-            max_steps=bars * 16 * 4, temperature=temperature, stop_on_end=True)
+        seq, reps, pos, countdown = model.generate(
+            bars=args.bars, temperature=temperature, stop_on_end=True)
 
         ns = to_note_sequence(seq)
 

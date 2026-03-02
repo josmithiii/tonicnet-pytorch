@@ -13,10 +13,15 @@ Tokens:
 - 2-51: chords (12 roots × 4 qualities + other + rest)
 - 52-98: pitches (MIDI 36-81 + rest), shared across all voices
 
-4-layer pre-norm causal Transformer (d_model=128, 4 heads, dff=512, ~841K params).
-Sinusoidal position encoding (max 3072 tokens). Embeddings: x→100d, r→32d, p→8d,
-concatenated to 140d, projected to 128d. Output skip connection: cat(transformer_out,
-r_emb, p_emb) → Linear(168, 99). KV-cache for autoregressive generation.
+4-layer pre-norm causal Transformer (d_model=128, 4 heads, dff=512, ~842K params).
+Sinusoidal position encoding (max 3072 tokens). Embeddings: x→100d, r→32d, p→8d, c→8d,
+concatenated to 148d, projected to 128d. Output skip connection: cat(transformer_out,
+r_emb, p_emb, c_emb) → Linear(176, 99). KV-cache for autoregressive generation.
+
+**Countdown conditioning** (`c`): bars-remaining countdown so the model learns cadential
+patterns near endings. 48-token embedding (covers up to 48 bars; dataset max is 39).
+Per-token: c = total_bars - 1 - token_index // 80, clamped to [0, 47]. At generation
+time, the user specifies `--bars N` and the countdown is computed on the fly.
 
 Training: AdamW (lr=3e-4, weight_decay=0.01), linear warmup (500 steps) + cosine
 decay to 1e-5, gradient clipping (max_norm=1.0), 150 epochs.
