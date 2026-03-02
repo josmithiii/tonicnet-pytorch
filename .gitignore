@@ -23,6 +23,9 @@ venv/
 *.wav
 *.mp3
 
+# Downloaded weights from RunPod
+weights-runpod/
+
 # Claude Code
 .claude/
 ClaudeCode.txt
