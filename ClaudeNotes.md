@@ -28,3 +28,28 @@ ssh root@194.68.245.17 -p 22023 -i ~/.ssh/runpod_ed25519 'tail -5 /workspace/Ton
   
 # Retrieve weights:
 ./runpod-pull.sh "ssh root@194.68.245.17 -p 22023 -i ~/.ssh/runpod_ed25519"
+
+---
+
+# Future: "shape" branch — bar-level multi-task loss
+
+Idea: add a second term to the loss function that predicts bar-level "shape",
+pushing the model to learn higher-level musical structure (not just next-token).
+
+Shape encoding per bar (per voice):
+  0 = static chord (four whole notes, no pitch change)
+  1 = voice changes pitch on beat 1
+  2 = voice changes pitch on beat 2
+  3 = voice changes pitch on beat 3
+  4 = voice changes pitch on beat 4
+  (could be a multi-hot vector if multiple beats have changes)
+
+Motivation: bars-remaining countdown (v4) matches v3 val_acc at epoch 51,
+suggesting structural conditioning doesn't help note-level prediction.
+A shape-prediction auxiliary loss would directly incentivize learning structure.
+
+Implementation sketch:
+  - Derive ground-truth shape labels from the existing dataset (no new data needed)
+  - Add a small prediction head on top of the Transformer at bar boundaries
+  - Combined loss = cross_entropy(notes) + lambda * cross_entropy(shape)
+  - lambda is a hyperparameter to tune
