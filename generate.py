@@ -16,6 +16,86 @@ from model import VOCABULARY, PITCH_REST, load_checkpoint, TonicNet
 
 
 # ---------------------------------------------------------------------------
+# Chord text file → chord tokens
+# ---------------------------------------------------------------------------
+
+FLAT_TO_SHARP: dict[str, str] = {
+    "Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#",
+}
+
+# Suffix after the root → chord quality in the vocabulary
+QUALITY_MAP: dict[str, str] = {
+    "": "major",
+    "m": "minor",
+    "dim": "diminished",
+    "aug": "augmented",
+    "7": "major",
+    "m7": "minor",
+    "dim7": "diminished",
+    "maj7": "major",
+}
+
+STEPS_PER_BAR = 16
+
+
+def _parse_chord_name(name: str) -> int:
+    """Parse a single chord name into a vocabulary index.
+
+    Handles root (with optional sharp/flat), quality suffix, and special
+    tokens like ``rest``.
+    """
+    if name == "rest":
+        return VOCABULARY.index("chord_rest")
+
+    # Extract root: letter + optional accidental
+    if len(name) >= 2 and name[1] in "#b":
+        root, suffix = name[:2], name[2:]
+    else:
+        root, suffix = name[:1], name[1:]
+
+    # Normalize flats → sharps
+    root = FLAT_TO_SHARP.get(root, root)
+
+    quality = QUALITY_MAP.get(suffix)
+    if quality is None:
+        sys.exit(f"ERROR: unknown chord suffix '{suffix}' in '{name}'")
+
+    token = f"chord_{root}_{quality}"
+    if token not in VOCABULARY:
+        sys.exit(f"ERROR: chord token '{token}' not in vocabulary (from '{name}')")
+    return VOCABULARY.index(token)
+
+
+def parse_chord_file(path: str) -> list[int]:
+    """Parse a chord text file into a flat list of chord token indices.
+
+    Format: ``|``-delimited bars, whitespace-separated chords within a bar.
+    Lines starting with ``#`` are comments.  See plan for full spec.
+    """
+    text = open(path).read()
+
+    # Strip comment lines, join remaining with | so newlines act as bar boundaries
+    lines = [line for line in text.splitlines()
+             if not line.strip().startswith("#")]
+    flat = " | ".join(lines)
+
+    # Split on bar delimiters
+    cells = [c.strip() for c in flat.split("|") if c.strip()]
+
+    tokens: list[int] = []
+    for cell in cells:
+        chords = cell.split()
+        steps_each = STEPS_PER_BAR // len(chords)
+        remainder = STEPS_PER_BAR % len(chords)
+        for i, chord_name in enumerate(chords):
+            tok = _parse_chord_name(chord_name)
+            n = steps_each + (1 if i < remainder else 0)
+            tokens.extend([tok] * n)
+
+    return tokens
+
+
+# ---------------------------------------------------------------------------
 # MIDI → soprano tokens
 # ---------------------------------------------------------------------------
 
@@ -143,6 +223,8 @@ def main() -> None:
                         help="Desired length in bars (default: 16)")
     parser.add_argument("--seed", metavar="MIDI",
                         help="Soprano MIDI file to harmonize (overrides --bars)")
+    parser.add_argument("--chords", metavar="PATH",
+                        help="Text file with chord progression (one bar per | cell)")
     parser.add_argument("--gpu", action="store_true",
                         help="Use GPU instead of CPU for generation")
     args = parser.parse_args()
@@ -171,6 +253,15 @@ def main() -> None:
         print(f"Soprano seed: {args.seed}  ({len(soprano_tokens)} steps, "
               f"{sop_bars:.1f} bars)")
 
+    # Parse chord progression if provided
+    chord_tokens: list[int] | None = None
+    if args.chords:
+        chord_tokens = parse_chord_file(args.chords)
+        chord_bars = len(chord_tokens) / STEPS_PER_BAR
+        unique = len(set(VOCABULARY[t] for t in chord_tokens))
+        print(f"Chord progression: {args.chords}  ({len(chord_tokens)} steps, "
+              f"{chord_bars:.1f} bars, {unique} unique chords)")
+
     for i in range(args.n_samples):
         temperature = args.temperature if args.temperature > 0 else np.random.uniform(0.25, 0.75)
         qpm = int(np.random.uniform(65, 85))
@@ -178,7 +269,7 @@ def main() -> None:
 
         seq, reps, pos, countdown = model.generate(
             bars=args.bars, temperature=temperature, stop_on_end=True,
-            soprano_tokens=soprano_tokens)
+            soprano_tokens=soprano_tokens, chord_tokens=chord_tokens)
 
         ns = to_note_sequence(seq)
 

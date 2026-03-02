@@ -224,6 +224,26 @@ def test_generate_soprano_bars_derived(model: TonicNet) -> None:
     assert len(x_seq) <= 241, f"Sequence too long: {len(x_seq)} (expected ≤241)"
 
 
+def test_generate_chord_forced(model: TonicNet) -> None:
+    """Chord positions in seeded generation match the forced tokens."""
+    # 16 steps = 1 bar, alternating two chord tokens
+    chord_C = VOCABULARY.index("chord_C_major")
+    chord_Am = VOCABULARY.index("chord_A_minor")
+    chords = [chord_C if i < 8 else chord_Am for i in range(16)]
+
+    x_seq, _, _, _ = model.generate(temperature=0.8, chord_tokens=chords)
+
+    # Chord is voice 0: loop index % 5 == 0, i.e. index = 0, 5, 10, ...
+    # x_seq position = index + 1 = 1, 6, 11, ...
+    for timestep in range(16):
+        loop_idx = timestep * 5
+        seq_pos = loop_idx + 1
+        if seq_pos < len(x_seq):
+            assert x_seq[seq_pos] == chords[timestep], \
+                f"Chord mismatch at timestep {timestep} (seq_pos {seq_pos}): " \
+                f"expected {VOCABULARY[chords[timestep]]}, got {VOCABULARY[x_seq[seq_pos]]}"
+
+
 def test_generate_soprano_unstopped_by_song_end(model: TonicNet) -> None:
     """Seeded generation does not stop early on song_end at sampled positions."""
     # Use 16 soprano steps; the sequence should span at least those

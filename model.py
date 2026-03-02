@@ -292,6 +292,7 @@ class TonicNet(nn.Module):
         temperature: float = 0.5,
         stop_on_end: bool = True,
         soprano_tokens: list[int] | None = None,
+        chord_tokens: list[int] | None = None,
     ) -> tuple[list[int], list[int], list[int], list[int]]:
         """Autoregressive sampling with KV-cache.
 
@@ -304,6 +305,9 @@ class TonicNet(nn.Module):
             soprano_tokens: optional list of vocab indices for the soprano
                   voice.  When provided, soprano positions are forced to
                   these tokens and the remaining voices are sampled.
+            chord_tokens: optional list of vocab indices for the chord
+                  voice.  When provided, chord positions are forced to
+                  these tokens.
 
         Returns:
             (x_sequence, r_sequence, p_sequence, c_sequence)
@@ -311,8 +315,12 @@ class TonicNet(nn.Module):
         self.eval()
         device = next(self.parameters()).device
 
-        if soprano_tokens is not None:
-            bars = math.ceil(len(soprano_tokens) / 16)
+        seed_len = max(
+            len(soprano_tokens) if soprano_tokens is not None else 0,
+            len(chord_tokens) if chord_tokens is not None else 0,
+        )
+        if seed_len > 0:
+            bars = math.ceil(seed_len / 16)
 
         max_steps = bars * 80 + 80  # one extra bar of slack for song_end
 
@@ -356,17 +364,22 @@ class TonicNet(nn.Module):
             h = torch.cat([h, r_emb, p_emb, c_emb], dim=-1)
             logits = self.dense(h).squeeze(0) / temperature
 
-            # At soprano positions, force the known token instead of sampling.
+            # Force known tokens at chord/soprano positions instead of sampling.
             # Token generated at iteration `index` fills x_sequence[index+1],
             # whose voice = index % 5  and  timestep = index // 5.
-            if soprano_tokens is not None and index % 5 == 1:
-                timestep = index // 5
-                if timestep < len(soprano_tokens):
-                    x = soprano_tokens[timestep]
-                else:
-                    x = PITCH_REST
-            else:
-                if soprano_tokens is not None:
+            voice = index % 5
+            timestep = index // 5
+            forced = False
+
+            if chord_tokens is not None and voice == 0:
+                x = chord_tokens[timestep] if timestep < len(chord_tokens) else chord_tokens[-1]
+                forced = True
+            elif soprano_tokens is not None and voice == 1:
+                x = soprano_tokens[timestep] if timestep < len(soprano_tokens) else PITCH_REST
+                forced = True
+
+            if not forced:
+                if seed_len > 0:
                     logits[0, SONG_END] = float("-inf")
                 probs = torch.softmax(logits, dim=-1)
                 x = torch.multinomial(probs, 1).item()
@@ -382,8 +395,8 @@ class TonicNet(nn.Module):
                 r = 0
             r_sequence.append(new_r)
 
-            # Don't stop early when soprano is driving the length
-            if stop_on_end and x == SONG_END and soprano_tokens is None:
+            # Don't stop early when seed tokens are driving the length
+            if stop_on_end and x == SONG_END and seed_len == 0:
                 break
 
         return x_sequence, r_sequence, p_sequence, c_sequence
