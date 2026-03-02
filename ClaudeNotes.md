@@ -53,3 +53,29 @@ Implementation sketch:
   - Add a small prediction head on top of the Transformer at bar boundaries
   - Combined loss = cross_entropy(notes) + lambda * cross_entropy(shape)
   - lambda is a hyperparameter to tune
+
+---
+
+# Future: "seed" branch — soprano-conditioned harmonization
+
+Idea: seed generation with a soprano melody (from a MIDI file) and have the
+model generate the remaining three voices (alto, tenor, bass) as harmonization.
+
+Motivation: v4 generation sounds good but lacks phrasing and proper endings.
+A given soprano provides natural phrase structure, cadence points, and determines
+the piece length (bar count inferred from the soprano, so countdown comes free).
+
+Input: a MIDI file containing one voice (soprano)
+
+Generation approach:
+  - Parse soprano MIDI into the existing token format
+  - At each timestep, soprano token is known (not sampled) — only sample A/T/B
+  - Bars-remaining countdown is derived from soprano length
+  - Could also work with any single voice as seed, not just soprano
+
+Training considerations:
+  - May not need retraining — the model already learns P(next | context),
+    so fixing one voice at generation time could work zero-shot
+  - If quality is poor, fine-tune with a masked-voice objective:
+    randomly mask one voice during training, predict the others
+  - Teacher forcing with known soprano, sample the rest
