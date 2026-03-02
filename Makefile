@@ -2,7 +2,7 @@ VENV := .venv
 PYTHON := $(VENV)/bin/python
 SOUNDFONT ?= $(firstword $(wildcard /opt/homebrew/Cellar/fluid-synth/*/share/fluid-synth/sf2/VintageDreamsWaves-v2.sf2 /usr/local/share/fluidsynth/default_sound_font.sf2))
 
-.PHONY: help setup generate train train-scratch wav clean distclean
+.PHONY: help setup generate train train-scratch snapshot wav clean distclean
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -21,6 +21,11 @@ train: setup  ## Fine-tune from existing weights (150 epochs)
 
 train-scratch: setup  ## Train from scratch (150 epochs)
 	$(PYTHON) train.py --overwrite --epochs 150
+
+snapshot:  ## Snapshot tonicnet-best.pt with timestamp
+	@test -f tonicnet-best.pt || { echo "ERROR: tonicnet-best.pt not found"; exit 1; }
+	cp tonicnet-best.pt tonicnet-best-$$(date +%Y-%m-%d-%H-%M-%S).pt
+	@ls -lh tonicnet-best-*.pt | tail -1
 
 sample_1.wav: sample_1.mid
 	fluidsynth -ni -F $@ -r 44100 $(SOUNDFONT) $<
