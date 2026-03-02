@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # RunPod GPU pod setup — paste into the RunPod web terminal.
 # Clones repo, installs deps, verifies dataset & GPU, then prints the training command.
+# Recommended pod: A40 ($0.20/hr spot) — model is <1M params, no need for more VRAM.
+# SSH: ssh root@<host> -p <port> -i ~/.ssh/runpod_ed25519
 set -euo pipefail
 
 REPO="https://github.com/josmithiii/TonicNet-PyTorch.git"
