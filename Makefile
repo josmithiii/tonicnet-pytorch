@@ -4,7 +4,7 @@ SOUNDFONT ?= $(firstword $(wildcard /opt/homebrew/Cellar/fluid-synth/*/share/flu
 
 .PHONY: help setup generate train train-scratch snapshot wav clean distclean
 
-help:  ## Show this help
+help h:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 
@@ -13,10 +13,10 @@ setup:  ## Create venv and install dependencies
 	uv pip install --python $(PYTHON) torch numpy music21 note-seq h5py
 	@echo "Done. Activate with: source $(VENV)/bin/activate"
 
-generate: setup  ## Generate 3 samples from trained weights
+generate g: setup  ## Generate 3 samples from trained weights
 	$(PYTHON) generate.py 3 --weights tonicnet-best.pt --bars 16
 
-train: setup  ## Fine-tune from existing weights (150 epochs)
+train t: setup  ## Fine-tune from existing weights (150 epochs)
 	$(PYTHON) train.py --weights tonicnet-best.pt --overwrite --epochs 150
 
 train-scratch: setup  ## Train from scratch (150 epochs)
@@ -33,7 +33,7 @@ MIDI = ocayfs.mid
 CHORDS = ocayfsChords.txt
 
 sample_1.mid: ## Generate sample_1.mid from a default seed and weights
-	$(PYTHON) generate.py 1 --seed $(MIDI) --chords $(CHORDS) --chord-bias 2.0 --weights tonicnet-weights.pt
+	$(PYTHON) generate.py 1 --seed $(MIDI) --chords $(CHORDS) --chord-bias 0.0 --weights tonicnet-weights.pt
 
 playmidi pm: sample_1.mid ## Play sample_1.mid using fluidsynth
 	fluidsynth -a coreaudio -i $(SOUNDFONT) sample_1.mid
