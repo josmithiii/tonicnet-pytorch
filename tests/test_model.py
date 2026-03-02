@@ -198,21 +198,29 @@ def test_generate_soprano_forced(model: TonicNet) -> None:
                 f"Soprano mismatch at timestep {timestep} (seq_pos {seq_pos})"
 
 
-def test_generate_soprano_pads_rest(model: TonicNet) -> None:
-    """When soprano_tokens runs out, remaining soprano slots get pitch_rest."""
+def test_generate_soprano_samples_after_seed(model: TonicNet) -> None:
+    """When soprano_tokens runs out, remaining soprano slots are sampled (not forced rest)."""
     # Only 4 soprano steps — model will generate beyond these
     soprano = [VOCABULARY.index("pitch_E5")] * 4
     x_seq, r_seq, p_seq, c_seq = model.generate(
         temperature=0.8, soprano_tokens=soprano)
 
     # bars = ceil(4/16) = 1, max_steps = 1*80 + 80 = 160
-    # Check that soprano positions beyond timestep 3 are pitch_rest
+    # First 4 soprano timesteps should be forced
+    for timestep in range(4):
+        loop_idx = timestep * 5 + 1
+        seq_pos = loop_idx + 1
+        if seq_pos < len(x_seq):
+            assert x_seq[seq_pos] == soprano[timestep], \
+                f"Expected forced soprano at timestep {timestep}"
+    # Beyond timestep 3, soprano is sampled freely (not necessarily rest)
+    # Just verify the sequence is still valid tokens
     for timestep in range(4, 20):
         loop_idx = timestep * 5 + 1
         seq_pos = loop_idx + 1
         if seq_pos < len(x_seq):
-            assert x_seq[seq_pos] == PITCH_REST, \
-                f"Expected pitch_rest at timestep {timestep}, got {VOCABULARY[x_seq[seq_pos]]}"
+            assert 0 <= x_seq[seq_pos] < 99, \
+                f"Invalid token at soprano timestep {timestep}"
 
 
 def test_generate_soprano_bars_derived(model: TonicNet) -> None:

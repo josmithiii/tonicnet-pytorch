@@ -177,22 +177,21 @@ def to_note_sequence(sequence: list[int]) -> note_seq.NoteSequence:
             print("Reached song end.")
             break
         elif token.startswith("pitch"):
-            pitch = token_to_pitch(token)
-            velocity = 70
-            if str(pitch) == "nan":
-                pitch = 0
-                velocity = 0
-
-            prev = notes_state[current_voice]
-            if prev is None or prev.pitch != pitch:
-                note = ns.notes.add()
-                note.start_time = t
-                note.end_time = t
-                note.pitch = int(pitch)
-                note.velocity = velocity
-                note.program = 19
-                note.instrument = current_voice
-                notes_state[current_voice] = note
+            if token == "pitch_rest":
+                # Rest: terminate current note, don't write a MIDI event
+                notes_state[current_voice] = None
+            else:
+                pitch = int(token_to_pitch(token))
+                prev = notes_state[current_voice]
+                if prev is None or prev.pitch != pitch:
+                    note = ns.notes.add()
+                    note.start_time = t
+                    note.end_time = t
+                    note.pitch = pitch
+                    note.velocity = 70
+                    note.program = 19
+                    note.instrument = current_voice
+                    notes_state[current_voice] = note
 
             current_voice += 1
             if current_voice == 4:

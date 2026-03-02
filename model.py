@@ -40,6 +40,8 @@ assert len(VOCABULARY) == 99, f"Expected 99 tokens, got {len(VOCABULARY)}"
 SONG_START = VOCABULARY.index("song_start")  # 0
 SONG_END = VOCABULARY.index("song_end")      # 1
 PITCH_REST = VOCABULARY.index("pitch_rest")  # last pitch token
+# Boundary: tokens [0, _FIRST_PITCH) are structural/chord; [_FIRST_PITCH, 99) are pitch
+_FIRST_PITCH = next(i for i, t in enumerate(VOCABULARY) if t.startswith("pitch_"))
 
 MODEL_VERSION = 4  # bump when architecture changes (v4 = Transformer + countdown)
 
@@ -374,11 +376,19 @@ class TonicNet(nn.Module):
             if chord_tokens is not None and voice == 0:
                 x = chord_tokens[timestep] if timestep < len(chord_tokens) else chord_tokens[-1]
                 forced = True
-            elif soprano_tokens is not None and voice == 1:
-                x = soprano_tokens[timestep] if timestep < len(soprano_tokens) else PITCH_REST
+            elif soprano_tokens is not None and voice == 1 and timestep < len(soprano_tokens):
+                x = soprano_tokens[timestep]
                 forced = True
 
             if not forced:
+                # Mask tokens invalid for this voice position
+                if voice == 0:
+                    # Chord slot: suppress all pitch tokens
+                    logits[0, _FIRST_PITCH:] = float("-inf")
+                else:
+                    # Pitch slot: suppress song_start and all chord tokens
+                    logits[0, SONG_START] = float("-inf")
+                    logits[0, 2:_FIRST_PITCH] = float("-inf")
                 if seed_len > 0:
                     logits[0, SONG_END] = float("-inf")
                 probs = torch.softmax(logits, dim=-1)
