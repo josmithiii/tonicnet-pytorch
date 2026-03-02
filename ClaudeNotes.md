@@ -21,9 +21,10 @@ ssh root@194.68.245.17 -p 22023 -i ~/.ssh/runpod_ed25519 \
     'cd /workspace/TonicNet-PyTorch && python train.py --overwrite --epochs 150'
 
 # Check on a training run:
-ssh root@194.68.245.17 -p 22023 -i ~/.ssh/runpod_ed25519 'tail -5 /workspace/TonicNet-PyTorch/tonicnet-best.csv'
-  
+ssh root@194.68.245.17 -p 22023 -i ~/.ssh/runpod_ed25519 'tail -5 /workspace/TonicNet-PyTorch/tonicnet-best.csv' | column -t -s,
+
+# Check on a training run at runpod (no `column`):
+(head -1 && tail -10) < tonicnet-best.csv | awk -F, '{printf "%-6s  %-11s  %-10s  %-9s  %-9s  %-15s  %s\n", $1,$2,$3,$4,$5,$6,$7}'
+
 # Retrieve weights:
 ./runpod-pull.sh "ssh root@194.68.245.17 -p 22023 -i ~/.ssh/runpod_ed25519"
-
-    
