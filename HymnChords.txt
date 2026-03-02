@@ -1,8 +1,7 @@
 // Chord track for HymnR.mid
 
 // USAGE:
-// python generate.py 1 --seed Hymn2.mid --chords HymnChords.txt --weights weights-runpod/2026-03-02-084619/tonicnet-best.pt
-// python generate.py 1 --seed Hymn2.mid --chords HymnChords.txt --weights weights-runpod/2026-03-02-084619/tonicnet-best.pt --chord-bias 2.0
+// python generate.py 1 --seed Hymn2.mid --chords HymnChords.txt [--chord-bias 2.0] [--weights tonicnet-weights.pt]
 
 Am | F C G7 C | G  G C G | Am Am E7 E7 |
 

@@ -374,6 +374,12 @@ class TonicNet(nn.Module):
         p_sequence: list[int] = []
         c_sequence: list[int] = []
 
+        # Extend position encodings if generation exceeds the buffer
+        if max_steps >= self.pos_enc.size(1):
+            pos_enc = sinusoidal_positions(max_steps + 1, self.d_model).to(device)
+        else:
+            pos_enc = self.pos_enc
+
         # Per-layer KV cache: list of (K, V) tuples
         kv_caches: list[tuple[torch.Tensor, torch.Tensor] | None] = [
             None for _ in range(self.n_layers)
@@ -396,7 +402,7 @@ class TonicNet(nn.Module):
             c_emb = self.embedding_c(c_t)
 
             h = self.input_proj(torch.cat([x_emb, r_emb, p_emb, c_emb], dim=-1))
-            h = h + self.pos_enc[:, index:index + 1, :]
+            h = h + pos_enc[:, index:index + 1, :]
 
             # No causal mask needed: single query, KV-cache has only past
             for i, layer in enumerate(self.layers):

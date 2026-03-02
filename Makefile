@@ -27,6 +27,20 @@ snapshot:  ## Snapshot tonicnet-best.pt with timestamp
 	cp tonicnet-best.pt tonicnet-best-$$(date +%Y-%m-%d-%H-%M-%S).pt
 	@ls -lh tonicnet-best-*.pt | tail -1
 
+#MIDI = Hymn2.mid
+#CHORDS = HymnChords.txt
+MIDI = ocayfs.mid
+CHORDS = ocayfsChords.txt
+
+sample_1.mid: ## Generate sample_1.mid from a default seed and weights
+	$(PYTHON) generate.py 1 --seed $(MIDI) --chords $(CHORDS) --chord-bias 2.0 --weights tonicnet-weights.pt
+
+playmidi pm: sample_1.mid ## Play sample_1.mid using fluidsynth
+	fluidsynth -a coreaudio -i $(SOUNDFONT) sample_1.mid
+
+printmidi prm: sample_1.mid ## Print sample_1.mid using printmidi script
+	printmidi sample_1.mid
+
 sample_1.wav: sample_1.mid
 	fluidsynth -ni -F $@ -r 44100 $(SOUNDFONT) $<
 wav: sample_1.wav  ## Render sample_1.mid to WAV (requires: brew install fluid-synth)

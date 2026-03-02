@@ -120,15 +120,24 @@ def midi_to_soprano_tokens(path: str) -> list[int]:
         midi_to_vocab[midi_num] = VOCABULARY.index(f"pitch_{p.nameWithOctave}")
 
     # Fill step array — default to rest
+    folded: dict[int, int] = {}  # original_pitch → folded_pitch
     tokens: list[int] = [PITCH_REST] * total_steps
     for note in qns.notes:
-        if note.pitch not in midi_to_vocab:
-            sys.exit(f"ERROR: MIDI pitch {note.pitch} in {path} "
-                     f"outside vocab range 36–81")
-        tok = midi_to_vocab[note.pitch]
+        pitch = note.pitch
+        if pitch not in midi_to_vocab:
+            # Fold into vocab range by octave transposition
+            while pitch > 81:
+                pitch -= 12
+            while pitch < 36:
+                pitch += 12
+            folded[note.pitch] = pitch
+        tok = midi_to_vocab[pitch]
         for step in range(note.quantized_start_step, note.quantized_end_step):
             if step < total_steps:
                 tokens[step] = tok
+
+    for orig, fold in sorted(folded.items()):
+        print(f"WARNING: MIDI pitch {orig} outside vocab range 36–81, folded to {fold}")
 
     # Strip leading rests (Logic often adds an empty count-in bar)
     while tokens and tokens[0] == PITCH_REST:
@@ -221,7 +230,7 @@ def main() -> None:
     parser.add_argument("n_samples", nargs="?", type=int, default=3,
                         help="Number of samples to generate (default: 3)")
     parser.add_argument("--weights", default="tonicnet-best.pt",
-                        help="Path to .pt weights (default: tonicnet-best.pt)")
+                        help="Path to .pt weights (default: tonicnet-weights.pt)")
     parser.add_argument("--temperature", type=float, default=0.0,
                         help="Fixed temperature (default: random 0.25-0.75)")
     parser.add_argument("--bars", type=int, default=16,
