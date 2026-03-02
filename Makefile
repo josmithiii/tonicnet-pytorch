@@ -16,11 +16,11 @@ setup:  ## Create venv and install dependencies
 generate: setup  ## Generate 3 samples from trained weights
 	$(PYTHON) generate.py 3 --weights tonicnet-best.pt
 
-train: setup  ## Train from scratch (150 epochs)
-	$(PYTHON) train.py --epochs 150 --overwrite
+train: setup  ## Fine-tune from existing weights (150 epochs)
+	$(PYTHON) train.py --weights tonicnet-best.pt --overwrite --epochs 150
 
-train-scratch: setup  ## Train from scratch (150 epochs, alias)
-	$(PYTHON) train.py --overwrite
+train-scratch: setup  ## Train from scratch (150 epochs)
+	$(PYTHON) train.py --overwrite --epochs 150
 
 sample_1.wav: sample_1.mid
 	fluidsynth -ni -F $@ -r 44100 $(SOUNDFONT) $<

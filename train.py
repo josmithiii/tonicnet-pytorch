@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import csv
 import datetime
 import math
 import os
@@ -277,8 +278,17 @@ def main() -> None:
     best_val_loss = float("inf")
     t0 = time.time()
 
+    # CSV log
+    log_fields = ["epoch", "train_loss", "train_acc", "val_loss", "val_acc", "lr", "secs"]
+    log_path = os.path.splitext(args.out)[0] + ".csv"
+    log_file = open(log_path, "w", newline="")
+    log_writer = csv.DictWriter(log_file, fieldnames=log_fields)
+    log_writer.writeheader()
+    log_file.flush()
+
     print(f"\nTraining for {args.epochs} epochs (batch_size={BATCH_SIZE}, "
-          f"{n_batches_per_epoch} batches/epoch, {total_steps} total steps)\n")
+          f"{n_batches_per_epoch} batches/epoch, {total_steps} total steps)")
+    print(f"Logging to {log_path}\n")
 
     for epoch in range(1, args.epochs + 1):
         epoch_t0 = time.time()
@@ -289,19 +299,32 @@ def main() -> None:
             model, val_x, val_r, val_p, val_y, device)
 
         current_lr = scheduler.get_last_lr()[0]
-        dt = datetime.timedelta(seconds=int(time.time() - epoch_t0))
+        epoch_secs = int(time.time() - epoch_t0)
+        dt = datetime.timedelta(seconds=epoch_secs)
         print(f"\rEpoch {epoch:3d}  "
               f"loss={train_loss:.4f}  acc={100*train_acc:.2f}%  "
               f"val_loss={val_loss:.4f}  val_acc={100*val_acc:.2f}%  "
               f"lr={current_lr:.2e}  [{dt}]")
+
+        log_writer.writerow({
+            "epoch": epoch,
+            "train_loss": f"{train_loss:.6f}",
+            "train_acc": f"{train_acc:.6f}",
+            "val_loss": f"{val_loss:.6f}",
+            "val_acc": f"{val_acc:.6f}",
+            "lr": f"{current_lr:.6e}",
+            "secs": epoch_secs,
+        })
+        log_file.flush()
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), args.out)
             print(f"  -> saved {args.out} (val_loss={val_loss:.4f})")
 
+    log_file.close()
     total = datetime.timedelta(seconds=int(time.time() - t0))
-    print(f"\nTraining complete in {total}")
+    print(f"\nTraining complete in {total}  (log: {log_path})")
 
 
 if __name__ == "__main__":
