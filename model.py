@@ -39,6 +39,7 @@ assert len(VOCABULARY) == 99, f"Expected 99 tokens, got {len(VOCABULARY)}"
 
 SONG_START = VOCABULARY.index("song_start")  # 0
 SONG_END = VOCABULARY.index("song_end")      # 1
+PITCH_REST = VOCABULARY.index("pitch_rest")  # last pitch token
 
 MODEL_VERSION = 4  # bump when architecture changes (v4 = Transformer + countdown)
 
@@ -287,23 +288,32 @@ class TonicNet(nn.Module):
     @torch.no_grad()
     def generate(
         self,
-        bars: int,
+        bars: int = 16,
         temperature: float = 0.5,
         stop_on_end: bool = True,
+        soprano_tokens: list[int] | None = None,
     ) -> tuple[list[int], list[int], list[int], list[int]]:
         """Autoregressive sampling with KV-cache.
 
         Args:
             bars: desired length in bars (used for countdown conditioning
-                  and max_steps = bars * 80 + 80).
+                  and max_steps = bars * 80 + 80).  Ignored when
+                  soprano_tokens is provided (derived from soprano length).
             temperature: sampling temperature.
             stop_on_end: stop when song_end token is generated.
+            soprano_tokens: optional list of vocab indices for the soprano
+                  voice.  When provided, soprano positions are forced to
+                  these tokens and the remaining voices are sampled.
 
         Returns:
             (x_sequence, r_sequence, p_sequence, c_sequence)
         """
         self.eval()
         device = next(self.parameters()).device
+
+        if soprano_tokens is not None:
+            bars = math.ceil(len(soprano_tokens) / 16)
+
         max_steps = bars * 80 + 80  # one extra bar of slack for song_end
 
         x = SONG_START
@@ -345,8 +355,20 @@ class TonicNet(nn.Module):
             h = self.ln_final(h)
             h = torch.cat([h, r_emb, p_emb, c_emb], dim=-1)
             logits = self.dense(h).squeeze(0) / temperature
-            probs = torch.softmax(logits, dim=-1)
-            x = torch.multinomial(probs, 1).item()
+
+            # At soprano positions, force the known token instead of sampling.
+            # Token generated at iteration `index` fills x_sequence[index+1],
+            # whose voice = index % 5  and  timestep = index // 5.
+            if soprano_tokens is not None and index % 5 == 1:
+                timestep = index // 5
+                if timestep < len(soprano_tokens):
+                    x = soprano_tokens[timestep]
+                else:
+                    x = PITCH_REST
+            else:
+                probs = torch.softmax(logits, dim=-1)
+                x = torch.multinomial(probs, 1).item()
+
             x_sequence.append(x)
 
             # Repetition tracking (matches TF2 generate.py exactly)
@@ -358,7 +380,8 @@ class TonicNet(nn.Module):
                 r = 0
             r_sequence.append(new_r)
 
-            if stop_on_end and x == SONG_END:
+            # Don't stop early when soprano is driving the length
+            if stop_on_end and x == SONG_END and soprano_tokens is None:
                 break
 
         return x_sequence, r_sequence, p_sequence, c_sequence

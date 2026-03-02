@@ -12,7 +12,44 @@ import note_seq
 import numpy as np
 import torch
 
-from model import VOCABULARY, load_checkpoint, TonicNet
+from model import VOCABULARY, PITCH_REST, load_checkpoint, TonicNet
+
+
+# ---------------------------------------------------------------------------
+# MIDI → soprano tokens
+# ---------------------------------------------------------------------------
+
+def midi_to_soprano_tokens(path: str) -> list[int]:
+    """Parse a single-voice MIDI file into a list of soprano token indices.
+
+    Quantizes to 16th notes (4 steps per quarter) and maps each step to
+    the corresponding ``pitch_*`` vocabulary token.  Steps with no active
+    note become ``pitch_rest``.
+    """
+    ns = note_seq.midi_file_to_note_sequence(path)
+    qns = note_seq.quantize_note_sequence(ns, steps_per_quarter=4)
+
+    total_steps = qns.total_quantized_steps
+    assert total_steps > 0, f"No notes found in {path}"
+
+    # Build MIDI pitch → vocab index lookup
+    midi_to_vocab: dict[int, int] = {}
+    for midi_num in range(36, 82):
+        p = music21.pitch.Pitch(midi=midi_num)
+        midi_to_vocab[midi_num] = VOCABULARY.index(f"pitch_{p.nameWithOctave}")
+
+    # Fill step array — default to rest
+    tokens: list[int] = [PITCH_REST] * total_steps
+    for note in qns.notes:
+        if note.pitch not in midi_to_vocab:
+            sys.exit(f"ERROR: MIDI pitch {note.pitch} in {path} "
+                     f"outside vocab range 36–81")
+        tok = midi_to_vocab[note.pitch]
+        for step in range(note.quantized_start_step, note.quantized_end_step):
+            if step < total_steps:
+                tokens[step] = tok
+
+    return tokens
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +141,8 @@ def main() -> None:
                         help="Fixed temperature (default: random 0.25-0.75)")
     parser.add_argument("--bars", type=int, default=16,
                         help="Desired length in bars (default: 16)")
+    parser.add_argument("--seed", metavar="MIDI",
+                        help="Soprano MIDI file to harmonize (overrides --bars)")
     parser.add_argument("--gpu", action="store_true",
                         help="Use GPU instead of CPU for generation")
     args = parser.parse_args()
@@ -124,13 +163,22 @@ def main() -> None:
     model.eval()
     print(f"Loaded {args.weights} on {device}")
 
+    # Parse soprano seed if provided
+    soprano_tokens: list[int] | None = None
+    if args.seed:
+        soprano_tokens = midi_to_soprano_tokens(args.seed)
+        sop_bars = len(soprano_tokens) / 16
+        print(f"Soprano seed: {args.seed}  ({len(soprano_tokens)} steps, "
+              f"{sop_bars:.1f} bars)")
+
     for i in range(args.n_samples):
         temperature = args.temperature if args.temperature > 0 else np.random.uniform(0.25, 0.75)
         qpm = int(np.random.uniform(65, 85))
         print(f"\nSample {i+1}/{args.n_samples}  temperature={temperature:.2f}  qpm={qpm}")
 
         seq, reps, pos, countdown = model.generate(
-            bars=args.bars, temperature=temperature, stop_on_end=True)
+            bars=args.bars, temperature=temperature, stop_on_end=True,
+            soprano_tokens=soprano_tokens)
 
         ns = to_note_sequence(seq)
 

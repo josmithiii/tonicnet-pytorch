@@ -71,14 +71,6 @@ python train.py --overwrite --out tonicnet-best.pt         # overwrite checkpoin
 
 Expects `dataset_train.p`, `dataset_valid.p`, `dataset_test.p` (TF2-format pickle files) in the working directory.
 
-### Convert Weights
-
-```bash
-python convert_weights.py [input.h5] [output.pt]
-```
-
-Handles GRU gate reordering (TF2 \[z,r,h\] to PyTorch \[r,z,n\]), kernel transposition, and bias splitting. Runs a forward-pass sanity check after conversion.
-
 ## Dependencies
 
 - Python 3.10+

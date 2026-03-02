@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 import pytest
 
-from model import TonicNet, SONG_START, SONG_END, MODEL_VERSION, load_checkpoint
+from model import TonicNet, VOCABULARY, SONG_START, SONG_END, PITCH_REST, MODEL_VERSION, load_checkpoint
 
 
 @pytest.fixture
@@ -171,3 +171,70 @@ def test_checkpoint_no_version() -> None:
         torch.save({"some_key": torch.zeros(1)}, path)
         with pytest.raises(SystemExit):
             load_checkpoint(path, torch.device("cpu"))
+
+
+# ---------------------------------------------------------------------------
+# Soprano-seeded generation
+# ---------------------------------------------------------------------------
+
+def test_generate_soprano_forced(model: TonicNet) -> None:
+    """Soprano positions in seeded generation match the forced tokens."""
+    # 16 steps = 1 bar worth of soprano
+    soprano = [VOCABULARY.index("pitch_C5")] * 16
+    x_seq, r_seq, p_seq, c_seq = model.generate(
+        temperature=0.8, soprano_tokens=soprano)
+
+    # x_seq[0] = song_start
+    # x_seq[1] = chord (sampled), x_seq[2] = soprano step 0 (forced), ...
+    # Position index+1 in x_seq corresponds to voice = index % 5.
+    # Soprano at voice 1: indices where index % 5 == 1, i.e. index = 1,6,11,...
+    # x_seq position = index + 1 = 2, 7, 12, ...
+    for timestep in range(16):
+        # index in the generate loop where this soprano was produced
+        loop_idx = timestep * 5 + 1
+        seq_pos = loop_idx + 1  # position in x_sequence
+        if seq_pos < len(x_seq):
+            assert x_seq[seq_pos] == soprano[timestep], \
+                f"Soprano mismatch at timestep {timestep} (seq_pos {seq_pos})"
+
+
+def test_generate_soprano_pads_rest(model: TonicNet) -> None:
+    """When soprano_tokens runs out, remaining soprano slots get pitch_rest."""
+    # Only 4 soprano steps — model will generate beyond these
+    soprano = [VOCABULARY.index("pitch_E5")] * 4
+    x_seq, r_seq, p_seq, c_seq = model.generate(
+        temperature=0.8, soprano_tokens=soprano)
+
+    # bars = ceil(4/16) = 1, max_steps = 1*80 + 80 = 160
+    # Check that soprano positions beyond timestep 3 are pitch_rest
+    for timestep in range(4, 20):
+        loop_idx = timestep * 5 + 1
+        seq_pos = loop_idx + 1
+        if seq_pos < len(x_seq):
+            assert x_seq[seq_pos] == PITCH_REST, \
+                f"Expected pitch_rest at timestep {timestep}, got {VOCABULARY[x_seq[seq_pos]]}"
+
+
+def test_generate_soprano_bars_derived(model: TonicNet) -> None:
+    """Bars count is derived from soprano length, not the bars parameter."""
+    soprano = [VOCABULARY.index("pitch_G4")] * 32  # 32 steps = 2 bars
+    x_seq, _, _, c_seq = model.generate(
+        bars=99, temperature=0.8, soprano_tokens=soprano)
+    # With 2 bars, max_steps = 2*80+80 = 240, so sequence length ≤ 241
+    assert len(x_seq) <= 241, f"Sequence too long: {len(x_seq)} (expected ≤241)"
+
+
+def test_generate_soprano_unstopped_by_song_end(model: TonicNet) -> None:
+    """Seeded generation does not stop early on song_end at sampled positions."""
+    # Use 16 soprano steps; the sequence should span at least those
+    soprano = [VOCABULARY.index("pitch_D5")] * 16
+    x_seq, _, _, _ = model.generate(
+        temperature=0.8, soprano_tokens=soprano, stop_on_end=True)
+    # Even if some sampled voice produces song_end, soprano positions
+    # up to timestep 15 (seq_pos = 15*5+1+1 = 77) should all be present
+    # (max_steps = 1*80+80 = 160, plenty of room).
+    # We verify at least the first 10 soprano timesteps are present.
+    for ts in range(10):
+        seq_pos = ts * 5 + 1 + 1
+        assert seq_pos < len(x_seq), \
+            f"Sequence too short ({len(x_seq)}), soprano timestep {ts} missing"
