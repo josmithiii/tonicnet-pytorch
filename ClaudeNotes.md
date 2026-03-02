@@ -29,9 +29,13 @@ ssh root@194.68.245.17 -p 22023 -i ~/.ssh/runpod_ed25519 'tail -5 /workspace/Ton
 # Retrieve weights:
 ./runpod-pull.sh "ssh root@194.68.245.17 -p 22023 -i ~/.ssh/runpod_ed25519"
 
+
+# Generate with a seed track:
+python generate.py 1 --seed Hymn2.mid --chords HymnChords.txt --weights weights-runpod/2026-03-02-084619/tonicnet-best.pt
+
 ---
 
-# Future: "shape" branch — bar-level multi-task loss
+# Future: "shape" branch -- bar-level multi-task loss
 
 Idea: add a second term to the loss function that predicts bar-level "shape",
 pushing the model to learn higher-level musical structure (not just next-token).
@@ -56,7 +60,7 @@ Implementation sketch:
 
 ---
 
-# Future: "seed" branch — soprano-conditioned harmonization
+# Future: "seed" branch -- soprano-conditioned harmonization
 
 Idea: seed generation with a soprano melody (from a MIDI file) and have the
 model generate the remaining three voices (alto, tenor, bass) as harmonization.
@@ -69,12 +73,12 @@ Input: a MIDI file containing one voice (soprano)
 
 Generation approach:
   - Parse soprano MIDI into the existing token format
-  - At each timestep, soprano token is known (not sampled) — only sample A/T/B
+  - At each timestep, soprano token is known (not sampled) -- only sample A/T/B
   - Bars-remaining countdown is derived from soprano length
   - Could also work with any single voice as seed, not just soprano
 
 Training considerations:
-  - May not need retraining — the model already learns P(next | context),
+  - May not need retraining -- the model already learns P(next | context),
     so fixing one voice at generation time could work zero-shot
   - If quality is poor, fine-tune with a masked-voice objective:
     randomly mask one voice during training, predict the others

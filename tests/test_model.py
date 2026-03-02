@@ -6,7 +6,10 @@ from pathlib import Path
 import torch
 import pytest
 
-from model import TonicNet, VOCABULARY, SONG_START, SONG_END, PITCH_REST, MODEL_VERSION, load_checkpoint
+from model import (
+    TonicNet, VOCABULARY, SONG_START, SONG_END, PITCH_REST, MODEL_VERSION,
+    load_checkpoint, _CHORD_PITCH_CLASSES, _PITCH_TOKEN_PC,
+)
 
 
 @pytest.fixture
@@ -266,3 +269,55 @@ def test_generate_soprano_unstopped_by_song_end(model: TonicNet) -> None:
         seq_pos = ts * 5 + 1 + 1
         assert seq_pos < len(x_seq), \
             f"Sequence too short ({len(x_seq)}), soprano timestep {ts} missing"
+
+
+# ---------------------------------------------------------------------------
+# Chord-tone biasing
+# ---------------------------------------------------------------------------
+
+def test_chord_pitch_classes_tables() -> None:
+    """Sanity-check the precomputed chord-tone lookup tables."""
+    c_maj = VOCABULARY.index("chord_C_major")
+    assert _CHORD_PITCH_CLASSES[c_maj] == {0, 4, 7}  # C, E, G
+
+    a_min = VOCABULARY.index("chord_A_minor")
+    assert _CHORD_PITCH_CLASSES[a_min] == {9, 0, 4}  # A, C, E
+
+    # chord_rest and chord_other should NOT be in the table
+    assert VOCABULARY.index("chord_rest") not in _CHORD_PITCH_CLASSES
+    assert VOCABULARY.index("chord_other") not in _CHORD_PITCH_CLASSES
+
+    # Every pitch token (except rest) should have a pitch class entry
+    for i, tok in enumerate(VOCABULARY):
+        if tok.startswith("pitch_") and tok != "pitch_rest":
+            assert i in _PITCH_TOKEN_PC, f"Missing pitch class for {tok}"
+    assert VOCABULARY.index("pitch_rest") not in _PITCH_TOKEN_PC
+
+
+def test_generate_chord_bias_favors_chord_tones(model: TonicNet) -> None:
+    """Strong chord bias makes the majority of sampled pitches be chord tones."""
+    # Force C major for 2 bars (32 timesteps)
+    chord_C = VOCABULARY.index("chord_C_major")
+    chords = [chord_C] * 32
+    c_maj_pcs = _CHORD_PITCH_CLASSES[chord_C]  # {0, 4, 7}
+
+    x_seq, _, _, _ = model.generate(
+        temperature=0.8, chord_tokens=chords, chord_bias=5.0)
+
+    # Collect all sampled pitch tokens (voices 1-4, not forced soprano)
+    chord_tone_count = 0
+    total_pitch_count = 0
+    for idx in range(len(x_seq) - 1):
+        voice = idx % 5
+        if voice == 0:
+            continue  # skip chord positions
+        tok = x_seq[idx + 1]
+        if tok in _PITCH_TOKEN_PC:
+            total_pitch_count += 1
+            if _PITCH_TOKEN_PC[tok] in c_maj_pcs:
+                chord_tone_count += 1
+
+    assert total_pitch_count > 0, "No pitch tokens were sampled"
+    ratio = chord_tone_count / total_pitch_count
+    assert ratio > 0.6, \
+        f"Only {ratio:.1%} chord tones with bias=5.0 (expected >60%)"

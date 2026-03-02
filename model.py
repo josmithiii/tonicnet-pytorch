@@ -47,6 +47,44 @@ MODEL_VERSION = 4  # bump when architecture changes (v4 = Transformer + countdow
 
 
 # ---------------------------------------------------------------------------
+# Chord-tone biasing tables
+# ---------------------------------------------------------------------------
+
+_NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+_QUALITY_INTERVALS: dict[str, tuple[int, ...]] = {
+    "major": (0, 4, 7),
+    "minor": (0, 3, 7),
+    "diminished": (0, 3, 6),
+    "augmented": (0, 4, 8),
+}
+
+
+def _build_chord_pitch_classes() -> dict[int, set[int]]:
+    """Map each chord vocab index → set of pitch classes (0–11) in that triad."""
+    result: dict[int, set[int]] = {}
+    for root_pc in range(12):
+        for quality, intervals in _QUALITY_INTERVALS.items():
+            token = f"chord_{_NOTE_NAMES[root_pc]}_{quality}"
+            idx = VOCABULARY.index(token)
+            result[idx] = {(root_pc + iv) % 12 for iv in intervals}
+    return result
+
+
+def _build_pitch_token_pc() -> dict[int, int]:
+    """Map each pitch vocab index → its pitch class (0–11).  Excludes pitch_rest."""
+    result: dict[int, int] = {}
+    for i, tok in enumerate(VOCABULARY):
+        if tok.startswith("pitch_") and tok != "pitch_rest":
+            name = tok.replace("pitch_", "")
+            result[i] = music21.pitch.Pitch(name).midi % 12
+    return result
+
+
+_CHORD_PITCH_CLASSES: dict[int, set[int]] = _build_chord_pitch_classes()
+_PITCH_TOKEN_PC: dict[int, int] = _build_pitch_token_pc()
+
+
+# ---------------------------------------------------------------------------
 # Checkpoint I/O
 # ---------------------------------------------------------------------------
 
@@ -295,6 +333,7 @@ class TonicNet(nn.Module):
         stop_on_end: bool = True,
         soprano_tokens: list[int] | None = None,
         chord_tokens: list[int] | None = None,
+        chord_bias: float = 0.0,
     ) -> tuple[list[int], list[int], list[int], list[int]]:
         """Autoregressive sampling with KV-cache.
 
@@ -310,6 +349,8 @@ class TonicNet(nn.Module):
             chord_tokens: optional list of vocab indices for the chord
                   voice.  When provided, chord positions are forced to
                   these tokens.
+            chord_bias: logit boost for pitch tokens whose pitch class
+                  belongs to the current chord's triad (default 0.0 = off).
 
         Returns:
             (x_sequence, r_sequence, p_sequence, c_sequence)
@@ -389,6 +430,14 @@ class TonicNet(nn.Module):
                     # Pitch slot: suppress song_start and all chord tokens
                     logits[0, SONG_START] = float("-inf")
                     logits[0, 2:_FIRST_PITCH] = float("-inf")
+                    # Chord-tone biasing: boost logits for chord tones
+                    if chord_bias > 0:
+                        chord_idx = x_sequence[timestep * 5 + 1]
+                        chord_pcs = _CHORD_PITCH_CLASSES.get(chord_idx)
+                        if chord_pcs is not None:
+                            for tok_idx, pc in _PITCH_TOKEN_PC.items():
+                                if pc in chord_pcs:
+                                    logits[0, tok_idx] += chord_bias
                 if seed_len > 0:
                     logits[0, SONG_END] = float("-inf")
                 probs = torch.softmax(logits, dim=-1)

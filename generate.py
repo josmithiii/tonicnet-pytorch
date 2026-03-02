@@ -130,6 +130,11 @@ def midi_to_soprano_tokens(path: str) -> list[int]:
             if step < total_steps:
                 tokens[step] = tok
 
+    # Strip leading rests (Logic often adds an empty count-in bar)
+    while tokens and tokens[0] == PITCH_REST:
+        tokens.pop(0)
+
+    assert tokens, f"No pitched notes found in {path}"
     return tokens
 
 
@@ -225,6 +230,8 @@ def main() -> None:
                         help="Soprano MIDI file to harmonize (overrides --bars)")
     parser.add_argument("--chords", metavar="PATH",
                         help="Text file with chord progression (one bar per | cell)")
+    parser.add_argument("--chord-bias", type=float, default=0.0,
+                        help="Logit boost for chord tones at sampling time (default: 0.0 = off)")
     parser.add_argument("--gpu", action="store_true",
                         help="Use GPU instead of CPU for generation")
     args = parser.parse_args()
@@ -262,6 +269,9 @@ def main() -> None:
         print(f"Chord progression: {args.chords}  ({len(chord_tokens)} steps, "
               f"{chord_bars:.1f} bars, {unique} unique chords)")
 
+    if args.chord_bias > 0:
+        print(f"Chord-tone bias: {args.chord_bias}")
+
     for i in range(args.n_samples):
         temperature = args.temperature if args.temperature > 0 else np.random.uniform(0.25, 0.75)
         qpm = int(np.random.uniform(65, 85))
@@ -269,7 +279,8 @@ def main() -> None:
 
         seq, reps, pos, countdown = model.generate(
             bars=args.bars, temperature=temperature, stop_on_end=True,
-            soprano_tokens=soprano_tokens, chord_tokens=chord_tokens)
+            soprano_tokens=soprano_tokens, chord_tokens=chord_tokens,
+            chord_bias=args.chord_bias)
 
         ns = to_note_sequence(seq)
 
