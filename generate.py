@@ -230,7 +230,7 @@ def main() -> None:
     parser.add_argument("n_samples", nargs="?", type=int, default=3,
                         help="Number of samples to generate (default: 3)")
     parser.add_argument("--weights", default="tonicnet-best.pt",
-                        help="Path to .pt weights (default: tonicnet-weights.pt)")
+                        help="Path to .pt weights (default: tonicnet-best.pt)")
     parser.add_argument("--temperature", type=float, default=0.0,
                         help="Fixed temperature (default: random 0.25-0.75)")
     parser.add_argument("--bars", type=int, default=16,

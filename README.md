@@ -1,18 +1,17 @@
 # TonicNet-PyTorch
 
-PyTorch reimplementation of **TonicNet** -- a GRU-based polyphonic music model for 4-part Bach chorale generation.
+PyTorch reimplementation of **TonicNet** -- a polyphonic music model for 4-part Bach chorale generation.
 
-Based on the paper [Improving Polyphonic Music Models with Feature-Rich Encoding](https://arxiv.org/abs/1911.11775) (Peracha, 2019) and ported from the [TF2 reimplementation](https://github.com/AI-Guru/tonicnet) by Tristan Behrens.
-
-Includes pretrained weights converted from the TF2 model for immediate use.
+Based on the paper [Improving Polyphonic Music Models with Feature-Rich Encoding](https://arxiv.org/abs/1911.11775) (Peracha, 2019), originally ported from the [TF2 reimplementation](https://github.com/AI-Guru/tonicnet) by Tristan Behrens, now evolved to a Transformer architecture.
 
 ## Architecture
 
 - **Vocabulary**: 99 tokens (song\_start, song\_end, 50 chords, 47 pitches)
-- **Embeddings**: token (100d) + repetition (32d, 80 values) + position (8d, 16 values)
-- **3 stacked GRU layers** (hidden=100 each) with 0.3 dropout
-- **Skip connections**: GRU output concatenated with repetition/position embeddings before output
-- **Output**: Linear(140, 99) logits
+- **Embeddings**: token (100d) + repetition (32d) + position (sinusoidal) + bars-remaining countdown
+- **4-layer pre-norm causal Transformer** with KV-cache for fast generation
+- **GRU alternative**: 3-layer GRU with compressed hidden state (via `GRUTonicNet`)
+- **Skip connections**: output concatenated with repetition/position embeddings
+- **Voice masking**: enforces valid chord/soprano/bass/alto/tenor token ordering
 
 Sequences interleave 5 tokens per timestep: \[chord, soprano, bass, alto, tenor\] at 16th-note resolution.
 
@@ -28,7 +27,7 @@ Or without Make:
 
 ```bash
 pip install torch music21 note-seq h5py numpy
-python generate.py 3 --weights tonicnet-weights.pt
+python generate.py 3 --weights tonicnet-best.pt
 ```
 
 ## Make Targets
@@ -37,10 +36,11 @@ python generate.py 3 --weights tonicnet-weights.pt
 make help           Show all targets
 make setup          Create venv and install dependencies (uses uv)
 make generate       Generate 3 samples from pretrained weights
-make train          Fine-tune from pretrained weights (75 epochs)
-make train-scratch  Train from scratch (75 epochs)
-make convert        Convert TF2 .h5 weights to PyTorch .pt
+make train          Fine-tune from existing weights (150 epochs)
+make train-scratch  Train from scratch (150 epochs)
+make snapshot       Snapshot tonicnet-best.pt with timestamp
 make wav            Render sample_1.mid to WAV (requires fluid-synth)
+make mp3            Render sample_1.mid to MP3 (requires ffmpeg)
 make clean          Remove generated MIDI and WAV files
 ```
 
@@ -48,24 +48,25 @@ make clean          Remove generated MIDI and WAV files
 
 | Script | Purpose |
 |--------|---------|
-| `model.py` | Model definition and vocabulary |
-| `generate.py` | Autoregressive sampling with MIDI output |
-| `train.py` | Training loop with masked loss |
-| `convert_weights.py` | Convert TF2 `.h5` weights to PyTorch `.pt` |
+| `model.py` | Transformer and GRU model definitions, vocabulary, voice masking |
+| `generate.py` | Autoregressive sampling with MIDI output, chord biasing, soprano seeding |
+| `train.py` | Training loop with masked loss and CSV logging |
+| `generate_v3.py` | Legacy v3 (pre-countdown) model generator |
 
 ### Generate
 
 ```bash
-python generate.py [n_samples] [--weights PATH] [--temperature T]
+python generate.py [n_samples] [--weights PATH] [--temperature T] [--bars N]
+python generate.py 1 --seed soprano.mid --chords chords.txt --chord-bias 2.0
 ```
 
-Produces MIDI files (`.mid` ) with random tempo (65-85 QPM) and temperature (0.25-0.75 if not fixed). Uses MPS/CUDA when available.
+Produces MIDI files with random tempo (65-85 QPM) and temperature (0.25-0.75 if not fixed). Supports soprano-seeded harmonization with optional chord constraints.
 
 ### Train
 
 ```bash
 python train.py                                            # train from scratch
-python train.py --weights tonicnet-weights.pt --epochs 75  # fine-tune
+python train.py --weights tonicnet-best.pt --epochs 150    # fine-tune
 python train.py --overwrite --out tonicnet-best.pt         # overwrite checkpoint
 ```
 
@@ -77,7 +78,7 @@ Expects `dataset_train.p`, `dataset_valid.p`, `dataset_test.p` (TF2-format pickl
 - PyTorch
 - music21
 - note-seq
-- h5py (for weight conversion only)
+- h5py
 - NumPy
 
 ## Credits
