@@ -29,11 +29,13 @@ snapshot:  ## Snapshot tonicnet-best.pt with timestamp
 
 #MIDI = Hymn2.mid
 #CHORDS = HymnChords.txt
+#WEIGHTS = tonicnet-weights.pt
 MIDI = ocayfs.mid
 CHORDS = ocayfsChords.txt
+WEIGHTS = gru-best.pt
 
 sample_1.mid: ## Generate sample_1.mid from a default seed and weights
-	$(PYTHON) generate.py 1 --seed $(MIDI) --chords $(CHORDS) --chord-bias 0.0 --weights tonicnet-weights.pt
+	$(PYTHON) generate.py 1 --seed $(MIDI) --chords $(CHORDS) --chord-bias 5.0 --weights tonicnet-weights.pt
 
 playmidi pm: sample_1.mid ## Play sample_1.mid using fluidsynth
 	fluidsynth -a coreaudio -i $(SOUNDFONT) sample_1.mid
