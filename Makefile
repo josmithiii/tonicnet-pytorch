@@ -47,6 +47,10 @@ sample_1.wav: sample_1.mid
 	fluidsynth -ni -F $@ -r 44100 $(SOUNDFONT) $<
 wav: sample_1.wav  ## Render sample_1.mid to WAV (requires: brew install fluid-synth)
 
+sample_1.mp3: sample_1.wav
+	ffmpeg -i sample_1.wav sample_1.mp3
+mp3: sample_1.mp3  ## Render sample_1.mid to MP3 (requires: ffmpeg)
+
 clean:  ## Remove generated MIDI and WAV files
 	rm -f sample_*.mid sample_*.wav
 
